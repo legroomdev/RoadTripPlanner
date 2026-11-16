@@ -249,6 +249,7 @@
     </section>
 
     <footer>
+      <span id="dataStatus"></span><br>
       Estimates only. Always check road conditions and plan fuel carefully in remote areas.<br>
       Map data © <a href="https://www.openstreetmap.org/copyright" rel="noopener">OpenStreetMap</a> contributors. Routing by <a href="https://project-osrm.org/" rel="noopener">OSRM</a>.
     </footer>
@@ -519,6 +520,7 @@
 
   // Load the servos for a set of cells (skipping ones already loaded), a batch at a time so the server isn't swamped.
   function fetchCells(keys) {
+    if (bundleReady) return Promise.resolve();
     var need = keys.filter(function (k) { return !cells[k]; });
     for (var i = 0; i < need.length; i += 30) {
       (function (batch) {
@@ -549,6 +551,79 @@
     var f = fuelsSold(s.tags);
     return "<b>" + esc(s.name) + "</b><br><small>" + (s.town ? esc(s.town) : "") + (s.h24 ? (s.town ? " · " : "") + "Open 24/7" : "") +
       (f ? "<br>Sells: " + f : "") + (extra ? "<br>" + extra : "") + "</small>";
+  }
+
+  // ---------- Saved servo list (servos.json, rebuilt weekly by GitHub Actions) ----------
+  // Downloaded once and kept on the phone, so finding fuel stops is instant and doesn't need the map server.
+  var bundleReady = false, bundleVersion = null;
+  function idb() {
+    return new Promise(function (res, rej) {
+      try {
+        var r = indexedDB.open("roadtrip", 1);
+        r.onupgradeneeded = function () { r.result.createObjectStore("kv"); };
+        r.onsuccess = function () { res(r.result); };
+        r.onerror = function () { rej(r.error); };
+      } catch (e) { rej(e); }
+    });
+  }
+  async function idbGet(k) {
+    var db = await idb();
+    return new Promise(function (res, rej) {
+      var q = db.transaction("kv").objectStore("kv").get(k);
+      q.onsuccess = function () { res(q.result); }; q.onerror = function () { rej(q.error); };
+    });
+  }
+  async function idbSet(k, v) {
+    var db = await idb();
+    return new Promise(function (res, rej) {
+      var tx = db.transaction("kv", "readwrite");
+      tx.objectStore("kv").put(v, k);
+      tx.oncomplete = function () { res(); }; tx.onerror = function () { rej(tx.error); };
+    });
+  }
+
+  var FUEL_BITS = [["fuel:octane_91", 1], ["fuel:e10", 2], ["fuel:octane_95", 4], ["fuel:octane_98", 8], ["fuel:diesel", 16], ["fuel:lpg", 32]];
+  function loadBundle(data) {
+    var ix = {}, idx = {};
+    data.cols.forEach(function (k, i) { ix[k] = i; });
+    data.rows.forEach(function (r) {
+      var t = { name: r[ix.name] };
+      if (r[ix.street]) t["addr:street"] = r[ix.street];
+      if (r[ix.town]) t["addr:suburb"] = r[ix.town];
+      if (r[ix.state]) t["addr:state"] = r[ix.state];
+      if (r[ix.postcode]) t["addr:postcode"] = r[ix.postcode];
+      FUEL_BITS.forEach(function (f) {
+        if (r[ix.yes] & f[1]) t[f[0]] = "yes"; else if (r[ix.no] & f[1]) t[f[0]] = "no";
+      });
+      if (r[ix.h24]) t.opening_hours = "24/7";
+      idx[r[ix.id]] = { id: r[ix.id], name: r[ix.name], lat: r[ix.lat], lon: r[ix.lon], tags: t, town: r[ix.town] || "", h24: !!r[ix.h24] };
+    });
+    servoIndex = idx;
+    bundleReady = true;
+    bundleVersion = data.v;
+    allServoLayer.clearLayers(); allMarkers = {};
+    var d = data.updated ? new Date(data.updated + "T00:00:00") : null;
+    $("dataStatus").textContent = "⛽ " + data.rows.length.toLocaleString("en-AU") + " servos saved on this device" +
+      (d ? " · updated " + d.toLocaleDateString("en-AU", { day: "numeric", month: "short" }) : "") + ".";
+  }
+
+  async function initServoData() {
+    try { var saved = await idbGet("servos"); if (saved && saved.rows) loadBundle(saved); } catch (e) {}
+    try {
+      var meta = await (await fetch("servos-meta.json", { cache: "no-cache" })).json();
+      if (!bundleReady || meta.v !== bundleVersion) {
+        if (!bundleReady) $("dataStatus").textContent = "⛽ Downloading servo list…";
+        var res = await fetch("servos.json", { cache: "no-cache" });
+        if (!res.ok) throw new Error("no file");
+        var data = await res.json();
+        loadBundle(data);
+        idbSet("servos", data).catch(function () {});
+        if (S.current) loadServos(); // re-plan with the full list
+      }
+    } catch (e) {
+      if (!bundleReady) $("dataStatus").textContent = "⛽ Finding servos live (no saved servo list yet).";
+    }
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
   }
 
   // Grey dots for every known servo that isn't one of the route's servos
@@ -801,7 +876,7 @@
   async function loadServos() {
     S.servosLoaded = false;
     $("planCard").classList.remove("hidden");
-    $("planBody").innerHTML = '<p class="empty">Finding servos along your route…</p>';
+    $("planBody").innerHTML = '<p class="empty">' + (bundleReady ? "Planning fuel stops…" : "Finding servos along your route…") + "</p>";
     try {
       await fetchCells(routeCells(S.current));
       S.servos = processServos();
@@ -1094,6 +1169,7 @@
   $("from").addEventListener("input", function () { if ($("from").value !== "My location") S.geoFrom = null; });
   setupSuggest("from");
   setupSuggest("to");
+  initServoData();
 
   $("copy").addEventListener("click", function () {
     if (!S.current) return;
