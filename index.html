@@ -1,0 +1,910 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Road Trip Planner Australia – Route, Stops & Fuel Cost</title>
+<meta name="description" content="Plan your Australian road trip: pick a start and destination, see the route, drive time and fuel cost, and find popular stops along the way that don't take you far off course.">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --sand: #f6efe4; --card: #fffaf3; --ink: #2a2420; --muted: #7a6d62;
+    --line: #e6d9c7; --ochre: #c2522d; --ochre-dark: #9e3f20; --gum: #4f6b52;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--sand); color: var(--ink); font: 16px/1.5 Inter, system-ui, sans-serif; -webkit-text-size-adjust: 100%; }
+
+  .app { display: flex; flex-direction: column; min-height: 100%; }
+  #map { height: 44vh; min-height: 260px; position: sticky; top: 0; z-index: 3; border-bottom: 1px solid var(--line); }
+  .panel { padding: 16px 16px 40px; position: relative; z-index: 1; background: var(--sand); }
+  @media (min-width: 900px) {
+    .app { display: grid; grid-template-columns: 420px 1fr; height: 100vh; }
+    .panel { order: 1; overflow-y: auto; height: 100vh; border-right: 1px solid var(--line); }
+    #map { order: 2; height: 100vh; position: relative; border: 0; }
+  }
+
+  .kicker { font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ochre); }
+  h1 { font-family: "Bricolage Grotesque", Inter, sans-serif; font-weight: 800; font-size: 30px; line-height: 1.05; margin: 4px 0 6px; letter-spacing: -.02em; }
+  .lede { color: var(--muted); margin: 0 0 16px; font-size: 15px; }
+  h2 { font-family: "Bricolage Grotesque", Inter, sans-serif; font-size: 19px; font-weight: 600; margin: 0 0 10px; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; margin-bottom: 14px; }
+  label { display: block; font-size: 14px; font-weight: 500; margin-bottom: 6px; }
+  .field { margin-bottom: 12px; }
+  .with-btn { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+  input, select {
+    width: 100%; font: inherit; font-size: 17px; color: var(--ink); background: #fff;
+    border: 1.5px solid var(--line); border-radius: 12px; padding: 11px 12px; -webkit-appearance: none; appearance: none;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--ochre); }
+  .icon-btn { font: inherit; border: 1.5px solid var(--line); background: #fff; border-radius: 12px; padding: 0 14px; cursor: pointer; font-size: 14px; font-weight: 600; color: var(--ink); white-space: nowrap; }
+  .btn { width: 100%; font: inherit; font-weight: 600; font-size: 16px; border: 0; cursor: pointer; background: var(--ochre); color: #fff; padding: 13px 16px; border-radius: 12px; }
+  .btn:active { background: var(--ochre-dark); }
+  .btn:disabled { opacity: .6; cursor: wait; }
+  .btn.secondary { background: var(--ink); }
+  .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+  .btn-row .btn { font-size: 14px; padding: 11px 10px; }
+  a.btn { display: block; text-align: center; text-decoration: none; }
+
+  .status { font-size: 14px; color: var(--muted); margin: 10px 0 0; min-height: 1em; }
+  .status.error { color: var(--ochre-dark); font-weight: 500; }
+
+  .summary { background: var(--ink); color: #fbf3e8; border: 0; }
+  .summary .route-name { font-size: 14px; color: #cbbba8; margin-bottom: 8px; }
+  .figs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .fig small { display: block; font-size: 12px; color: #cbbba8; text-transform: uppercase; letter-spacing: .06em; }
+  .fig b { font-family: "Bricolage Grotesque", Inter, sans-serif; font-size: 28px; font-weight: 800; line-height: 1.1; }
+  .fig span { font-size: 13px; color: #f0c9a8; }
+  .note { font-size: 13px; color: #cbbba8; margin-top: 12px; padding-top: 12px; border-top: 1px solid #4a403a; }
+
+  details.fuel summary { cursor: pointer; font-weight: 600; list-style: none; display: flex; justify-content: space-between; }
+  details.fuel summary::-webkit-details-marker { display: none; }
+  details.fuel summary::after { content: "＋"; color: var(--muted); }
+  details.fuel[open] summary::after { content: "－"; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+
+  .stops-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .stops-head h2 { margin: 0; }
+  .stops-head select { width: auto; font-size: 14px; padding: 8px 30px 8px 10px; }
+  .chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 8px; scrollbar-width: none; }
+  .chip { flex: none; font: inherit; font-size: 13px; font-weight: 600; border: 1.5px solid var(--line); background: #fff; color: var(--ink); border-radius: 99px; padding: 6px 12px; cursor: pointer; }
+  .chip[aria-pressed=true] { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+  .stop { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+  .stop:first-child { border-top: 0; }
+  .stop .emo { font-size: 22px; text-align: center; }
+  .stop .name { font-weight: 600; font-size: 15px; line-height: 1.25; cursor: pointer; }
+  .stop .meta { font-size: 13px; color: var(--muted); }
+  .badge { display: inline-block; font-size: 11px; font-weight: 600; color: var(--gum); background: #e4ece2; border-radius: 6px; padding: 1px 6px; margin-left: 4px; vertical-align: 1px; }
+  .add { font: inherit; font-size: 13px; font-weight: 600; border: 1.5px solid var(--ochre); color: var(--ochre); background: #fff; border-radius: 10px; padding: 7px 10px; cursor: pointer; white-space: nowrap; }
+  .add.on { background: var(--ochre); color: #fff; }
+  .empty { color: var(--muted); font-size: 14px; padding: 6px 0; }
+  .hidden { display: none !important; }
+
+  .hint { font-size: 13px; color: var(--muted); margin: 10px 0 0; }
+  .plan-sum { font-size: 14px; background: #f3e9db; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+  .plan-sum b { font-size: 16px; }
+  .pstep { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: start; padding: 10px 0; border-top: 1px solid var(--line); }
+  .pstep:first-child { border-top: 0; }
+  .pstep .num { width: 28px; height: 28px; border-radius: 50%; background: var(--ink); color: #fff; display: grid; place-items: center; font-size: 13px; font-weight: 600; }
+  .pstep .num.end { background: var(--gum); }
+  .pstep .t { font-weight: 600; font-size: 15px; line-height: 1.25; }
+  .pstep .m { font-size: 13px; color: var(--muted); }
+  .pstep .c { text-align: right; font-weight: 600; font-size: 15px; }
+  .pstep .c small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
+  .warn { background: #fbe3d9; color: var(--ochre-dark); border-radius: 10px; padding: 10px 12px; font-size: 14px; margin: 8px 0; }
+  details.servos { margin-top: 10px; }
+  details.servos summary { cursor: pointer; font-weight: 600; font-size: 15px; padding: 6px 0; }
+  .srow { display: grid; grid-template-columns: 1fr 92px; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+  .srow input { font-size: 15px; padding: 8px 10px; }
+  .badge.warnb { color: var(--ochre-dark); background: #fbe3d9; }
+  .fpin { background: var(--ink); color: #fff; border: 2px solid #fff; border-radius: 14px; font: 600 12px/1 Inter, sans-serif; padding: 5px 7px; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,.3); }
+  .leaflet-popup-content { font: 14px/1.4 Inter, sans-serif; margin: 12px 14px; }
+  .leaflet-popup-content b { font-size: 15px; }
+  .leaflet-popup-content .add { margin-top: 8px; }
+  footer { font-size: 12px; color: var(--muted); margin-top: 20px; }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="app">
+  <div id="map" role="region" aria-label="Map"></div>
+
+  <main class="panel">
+    <div class="kicker">Aussie road trip planner</div>
+    <h1>Plan the drive</h1>
+    <p class="lede">Route, drive time, smart fuel stops for your vehicle, and the best stops along the way.</p>
+
+    <form class="card" id="tripForm" autocomplete="off">
+      <div class="field">
+        <label for="from">Starting from</label>
+        <div class="with-btn">
+          <input id="from" type="text" placeholder="e.g. Adelaide" enterkeyhint="next">
+          <button type="button" class="icon-btn" id="locate" title="Use my location">📍 Me</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="to">Going to</label>
+        <input id="to" type="text" placeholder="e.g. Melbourne" enterkeyhint="go">
+      </div>
+      <button class="btn" id="go" type="submit">Plan my trip</button>
+      <p class="status" id="status" aria-live="polite"></p>
+    </form>
+
+    <section class="card summary hidden" id="summary" aria-live="polite">
+      <div class="route-name" id="routeName"></div>
+      <div class="figs">
+        <div class="fig"><small>Distance</small><b id="dist">–</b><span id="distExtra"></span></div>
+        <div class="fig"><small>Drive time</small><b id="time">–</b><span id="timeExtra"></span></div>
+        <div class="fig"><small>Fuel cost</small><b id="cost">–</b><span id="litres"></span></div>
+        <div class="fig"><small>Rest breaks</small><b id="breaks">–</b><span>every 2 hrs</span></div>
+      </div>
+      <div class="note">Drive time is without stops. Add time for breaks, food and sightseeing.</div>
+      <div class="btn-row">
+        <a class="btn" id="gmaps" href="#" target="_blank" rel="noopener">Open in Google Maps</a>
+        <button type="button" class="btn secondary" id="copy">Copy trip</button>
+      </div>
+      <p class="status" id="copyStatus" style="color:#cbbba8"></p>
+    </section>
+
+    <section class="card hidden" id="planCard">
+      <h2>⛽ Fuel plan</h2>
+      <div id="planBody"><p class="empty">Finding servos along your route…</p></div>
+      <details class="servos" id="servoBox">
+        <summary>All servos on the route <span id="servoCount"></span></summary>
+        <p class="hint">Know the price at a servo? Enter it and the plan re-works itself to favour the cheap ones.</p>
+        <div id="servoList"></div>
+      </details>
+    </section>
+
+    <details class="card fuel" id="fuelBox" open>
+      <summary>Your vehicle</summary>
+      <div class="row">
+        <div>
+          <label for="fuelType">Fuel type</label>
+          <select id="fuelType">
+            <option value="ulp">Unleaded 91</option><option value="e10">E10</option>
+            <option value="p95">Premium 95</option><option value="p98">Premium 98</option>
+            <option value="diesel">Diesel</option><option value="lpg">LPG</option>
+          </select>
+        </div>
+        <div>
+          <label for="tank">Tank size (L)</label>
+          <input id="tank" type="number" inputmode="decimal" step="1" min="10" value="60">
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="economy">Fuel use (L/100km)</label>
+          <input id="economy" type="number" inputmode="decimal" step="0.1" min="0" value="8">
+        </div>
+        <div>
+          <label for="tow">Towing</label>
+          <select id="tow">
+            <option value="0">Not towing</option><option value="0.15">Light trailer (+15%)</option>
+            <option value="0.35">Caravan (+35%)</option><option value="0.5">Heavy van (+50%)</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="startFuel">Leaving with</label>
+          <select id="startFuel">
+            <option value="1">Full tank</option><option value="0.75">3/4 tank</option>
+            <option value="0.5">1/2 tank</option><option value="0.25">1/4 tank</option>
+          </select>
+        </div>
+        <div>
+          <label for="reserve">Never go below</label>
+          <select id="reserve"><option value="0.1">10% of tank</option><option value="0.2" selected>20% of tank</option><option value="0.3">30% of tank</option></select>
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="price">Usual price ($/L)</label>
+          <input id="price" type="number" inputmode="decimal" step="0.01" min="0" value="2.00">
+        </div>
+        <div>
+          <label for="people">Splitting between</label>
+          <select id="people">
+            <option value="1">Just me</option><option value="2">2 people</option><option value="3">3 people</option>
+            <option value="4">4 people</option><option value="5">5 people</option><option value="6">6 people</option>
+          </select>
+        </div>
+      </div>
+      <p class="hint" id="rangeHint"></p>
+    </details>
+
+    <section class="card hidden" id="stopsCard">
+      <div class="stops-head">
+        <h2>Stops along the way</h2>
+        <select id="radius" aria-label="How far off the route">
+          <option value="2">Within 2 km</option>
+          <option value="5" selected>Within 5 km</option>
+          <option value="10">Within 10 km</option>
+          <option value="20">Within 20 km</option>
+        </select>
+      </div>
+      <div class="chips" id="chips"></div>
+      <div id="stopList"></div>
+    </section>
+
+    <footer>
+      Estimates only. Always check road conditions and plan fuel carefully in remote areas.<br>
+      Map data © <a href="https://www.openstreetmap.org/copyright" rel="noopener">OpenStreetMap</a> contributors. Routing by <a href="https://project-osrm.org/" rel="noopener">OSRM</a>.
+    </footer>
+  </main>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  // ---------- Services (free OpenStreetMap-based; swap for keyed providers before heavy public use) ----------
+  var GEOCODE_URL = "https://nominatim.openstreetmap.org/search";
+  var ROUTE_URL = "https://router.project-osrm.org/route/v1/driving/";
+  var OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+
+  var CATS = {
+    must:       { label: "Must-sees",     emo: "⭐" },
+    town:       { label: "Towns",         emo: "🏘️", color: "#4f6b52" },
+    lookout:    { label: "Lookouts",      emo: "🔭", color: "#2f6f8f" },
+    nature:     { label: "Nature",        emo: "🌿", color: "#3f8a4f" },
+    attraction: { label: "Attractions",   emo: "🎯", color: "#c2522d" },
+    museum:     { label: "Museums & art", emo: "🏛️", color: "#7a4f9a" },
+    history:    { label: "History",       emo: "📜", color: "#8a6a3a" },
+    family:     { label: "Zoos & parks",  emo: "🦘", color: "#d08a1e" }
+  };
+
+  var $ = function (id) { return document.getElementById(id); };
+  var S = {
+    from: null, to: null, geoFrom: null,
+    base: null,          // base route (no added stops): {coords, cum, distance, duration}
+    current: null,       // route actually shown (with added stops)
+    pois: [], selected: {}, filter: "all",
+    servos: [], servosLoaded: false, prices: {}
+  };
+
+  // ---------- Map ----------
+  var map = L.map("map", { zoomControl: true }).setView([-28.5, 134], 4);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+  var routeLayer = L.layerGroup().addTo(map);
+  var poiLayer = L.layerGroup().addTo(map);
+  var servoLayer = L.layerGroup().addTo(map);
+  var poiMarkers = {};
+
+  // ---------- Helpers ----------
+  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function setStatus(msg, isErr) { var s = $("status"); s.textContent = msg || ""; s.className = "status" + (isErr ? " error" : ""); }
+  function km(n) { return Math.round(n).toLocaleString("en-AU") + " km"; }
+  function dur(sec) {
+    var h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
+    if (m === 60) { h++; m = 0; }
+    return h ? h + "h " + (m < 10 ? "0" : "") + m + "m" : m + " min";
+  }
+  var aud = new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 });
+
+  function hav(a, b) {
+    var R = 6371, r = Math.PI / 180;
+    var dLat = (b[0] - a[0]) * r, dLon = (b[1] - a[1]) * r;
+    var s = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+  }
+  function cumulative(coords) {
+    var c = [0];
+    for (var i = 1; i < coords.length; i++) c.push(c[i - 1] + hav(coords[i - 1], coords[i]));
+    return c;
+  }
+  // Thin a line so consecutive points are at least `stepKm` apart (always keeps both ends).
+  function thin(coords, cum, stepKm) {
+    var outC = [coords[0]], outCum = [0], next = stepKm;
+    for (var i = 1; i < coords.length - 1; i++) {
+      if (cum[i] >= next) { outC.push(coords[i]); outCum.push(cum[i]); next = cum[i] + stepKm; }
+    }
+    outC.push(coords[coords.length - 1]); outCum.push(cum[cum.length - 1]);
+    return { coords: outC, cum: outCum };
+  }
+  // Distance (km) from point p to the polyline, and how far along the line the nearest point is.
+  function locate(p, coords, cum) {
+    var r = Math.PI / 180, kx = 111.32 * Math.cos(p[0] * r), ky = 110.57;
+    var best = { off: Infinity, along: 0 };
+    for (var i = 1; i < coords.length; i++) {
+      var a = coords[i - 1], b = coords[i];
+      var ax = (a[1] - p[1]) * kx, ay = (a[0] - p[0]) * ky;
+      var bx = (b[1] - p[1]) * kx, by = (b[0] - p[0]) * ky;
+      var dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy;
+      var t = L2 ? -(ax * dx + ay * dy) / L2 : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      var x = ax + t * dx, y = ay + t * dy, d = Math.sqrt(x * x + y * y);
+      if (d < best.off) best = { off: d, along: cum[i - 1] + t * (cum[i] - cum[i - 1]) };
+    }
+    return best;
+  }
+
+  // ---------- Services ----------
+  async function geocode(q) {
+    var url = GEOCODE_URL + "?format=jsonv2&limit=1&countrycodes=au&q=" + encodeURIComponent(q);
+    var res = await fetch(url, { headers: { "Accept-Language": "en-AU" } });
+    if (!res.ok) throw new Error("Place search is busy. Give it a few seconds and try again.");
+    var j = await res.json();
+    if (!j.length) throw new Error("Couldn't find \"" + q + "\" in Australia. Try adding the state, e.g. \"Bright VIC\".");
+    var name = j[0].name || String(j[0].display_name).split(",")[0];
+    return { lat: +j[0].lat, lon: +j[0].lon, name: name };
+  }
+
+  async function getRoute(points) {
+    var path = points.map(function (p) { return p.lon.toFixed(5) + "," + p.lat.toFixed(5); }).join(";");
+    var res = await fetch(ROUTE_URL + path + "?overview=full&geometries=geojson&steps=false");
+    var j = await res.json().catch(function () { return {}; });
+    if (!res.ok || j.code !== "Ok" || !j.routes || !j.routes.length) {
+      throw new Error("Couldn't find a driving route between those places.");
+    }
+    var rt = j.routes[0];
+    var coords = rt.geometry.coordinates.map(function (c) { return [c[1], c[0]]; });
+    return { coords: coords, cum: cumulative(coords), distance: rt.distance / 1000, duration: rt.duration };
+  }
+
+  // Sample a route for an Overpass "around" query: enough points to follow the road, few enough to stay fast.
+  function queryLine(route) {
+    var total = route.cum[route.cum.length - 1];
+    var step = Math.max(3, total / 140);
+    return thin(route.coords, route.cum, step).coords
+      .map(function (c) { return c[0].toFixed(4) + "," + c[1].toFixed(4); }).join(",");
+  }
+
+  async function overpass(q, busyMsg) {
+    var res = await fetch(OVERPASS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+      body: "data=" + encodeURIComponent(q)
+    });
+    if (!res.ok) throw new Error(busyMsg);
+    var j = await res.json();
+    return j.elements || [];
+  }
+
+  async function getServos() {
+    var q = "[out:json][timeout:60];(nwr[\"amenity\"=\"fuel\"](around:1500," + queryLine(S.current) + "););out center tags 900;";
+    return overpass(q, "The servo finder is busy right now.");
+  }
+
+  async function getStops(radiusKm) {
+    var line = queryLine(S.base);
+    var R = Math.round(radiusKm * 1000);
+    var around = "(around:" + R + "," + line + ")";
+    var q = "[out:json][timeout:60];(" +
+      'nwr["tourism"~"^(attraction|viewpoint|museum|gallery|zoo|aquarium|theme_park)$"]["name"]' + around + ";" +
+      'nwr["historic"~"^(monument|memorial|ruins|heritage|castle|fort)$"]["name"]["wikidata"]' + around + ";" +
+      'nwr["waterway"="waterfall"]["name"]' + around + ";" +
+      'nwr["natural"~"^(beach|cave_entrance|peak)$"]["name"]["wikidata"]' + around + ";" +
+      'node["place"~"^(town|city)$"]["name"]' + around + ";" +
+      ");out center tags 600;";
+    return overpass(q, "The stops finder is busy right now.");
+  }
+
+  // ---------- Servos & fuel plan ----------
+  var FUEL_TAG = { ulp: "fuel:octane_91", e10: "fuel:e10", p95: "fuel:octane_95", p98: "fuel:octane_98", diesel: "fuel:diesel", lpg: "fuel:lpg" };
+  var FUEL_NAME = { ulp: "unleaded", e10: "E10", p95: "premium 95", p98: "premium 98", diesel: "diesel", lpg: "LPG" };
+
+  function vehicle() {
+    var tank = parseFloat($("tank").value) || 0;
+    var use = (parseFloat($("economy").value) || 0) * (1 + (parseFloat($("tow").value) || 0));
+    return {
+      tank: tank, use: use, type: $("fuelType").value,
+      startL: tank * parseFloat($("startFuel").value),
+      reserveL: tank * parseFloat($("reserve").value),
+      price: parseFloat($("price").value) || 0
+    };
+  }
+
+  function sells(tags, type) {
+    var v = tags[FUEL_TAG[type]];
+    if (v === "yes") return "yes";
+    if (v === "no") return "no";
+    return "unknown";
+  }
+
+  function processServos(elements) {
+    var r = S.current, near = thin(r.coords, r.cum, 0.3), out = [];
+    elements.forEach(function (el) {
+      var lat = el.lat != null ? el.lat : el.center && el.center.lat;
+      var lon = el.lon != null ? el.lon : el.center && el.center.lon;
+      if (lat == null || lon == null) return;
+      var t = el.tags || {};
+      var loc = locate([lat, lon], near.coords, near.cum);
+      if (loc.off > 1.5) return;
+      // Same servo mapped twice (point + building outline): keep one
+      if (out.some(function (s) { return Math.abs(s.lat - lat) < 0.002 && Math.abs(s.lon - lon) < 0.002; })) return;
+      var brand = t.brand || "";
+      var name = t.name || brand || "Servo";
+      if (brand && name.toLowerCase().indexOf(brand.toLowerCase()) === -1) name = brand + " " + name;
+      out.push({
+        id: el.type + el.id, name: name, lat: lat, lon: lon, tags: t,
+        town: t["addr:suburb"] || t["addr:city"] || "",
+        h24: t.opening_hours === "24/7", along: loc.along, off: loc.off
+      });
+    });
+    return out.sort(function (a, b) { return a.along - b.along; });
+  }
+
+  function servoPrice(s, v) { return S.prices[s.id] > 0 ? S.prices[s.id] : v.price; }
+
+  // Classic fuel-stop problem, greedy: from each servo, if a cheaper one is in range, buy just enough to get there;
+  // otherwise fill up and move to the cheapest servo in range (furthest one on a tie, to keep stops down).
+  function planFuel() {
+    var v = vehicle();
+    if (!(v.tank > 0) || !(v.use > 0) || !S.current) return null;
+    var total = S.current.cum[S.current.cum.length - 1];
+    var usable = v.tank - v.reserveL, range = usable / v.use * 100;
+    var L = function (km) { return km * v.use / 100; };
+    S.servos.forEach(function (s) {
+      var sell = sells(s.tags, v.type);
+      s.sell = sell;
+      s.ok = sell === "yes" || (sell === "unknown" && v.type !== "lpg");
+    });
+    var st = S.servos.filter(function (s) { return s.ok; });
+    var price = function (s) { return servoPrice(s, v); };
+    var fuel = Math.max(0, v.startL - v.reserveL); // litres above the reserve
+    var pos = 0, cur = null, steps = [], warnings = [], bought = 0, cost = 0, guard = 0;
+
+    while (guard++ < 400) {
+      var reach = pos + (cur ? range : fuel / v.use * 100);
+      var cands = st.filter(function (s) { return s.along > pos + 0.05 && s.along <= reach; });
+      var bestOf = function (list) {
+        return list.reduce(function (b, s) { return (price(s) < price(b) - 1e-9 || (Math.abs(price(s) - price(b)) < 1e-9 && s.along > b.along)) ? s : b; });
+      };
+      if (!cur) { // at the start, with whatever is in the tank
+        if (total <= reach) break;
+        if (!cands.length) { warnings.push(gapWarning(null, pos, reach, st, total, range)); break; }
+        var first = bestOf(cands);
+        fuel -= L(first.along - pos); pos = first.along; cur = first;
+        continue;
+      }
+      var p = price(cur), target = null, buy = undefined;
+      var cheaper = cands.filter(function (s) { return price(s) < p - 1e-9 && s.along < total; })[0];
+      if (cheaper) target = cheaper;
+      else if (total <= reach) target = null;
+      else if (cands.length) { target = bestOf(cands); buy = usable - fuel; }
+      else { warnings.push(gapWarning(cur, pos, reach, st, total, range)); buy = usable - fuel; record(cur, buy, p, fuel); break; }
+      var nextAt = target ? target.along : total;
+      if (buy === undefined) buy = Math.max(0, L(nextAt - pos) - fuel);
+      record(cur, buy, p, fuel);
+      fuel += buy - L(nextAt - pos); pos = nextAt;
+      if (!target) break;
+      cur = target;
+    }
+
+    function record(s, buy, p, fuelBefore) {
+      if (buy < 0.5) return;
+      buy = Math.min(buy, v.tank - (fuelBefore + v.reserveL));
+      steps.push({ s: s, buy: buy, price: p, cost: buy * p, arriveL: fuelBefore + v.reserveL, full: fuelBefore + buy >= usable - 0.5 });
+      bought += buy; cost += buy * p;
+    }
+
+    // Longest stretch with no usable servo (including from the start and to the finish)
+    var marks = [0].concat(st.map(function (s) { return s.along; }), [total]), gap = 0, gapAt = 0;
+    for (var i = 1; i < marks.length; i++) if (marks[i] - marks[i - 1] > gap) { gap = marks[i] - marks[i - 1]; gapAt = marks[i - 1]; }
+
+    return {
+      steps: steps, warnings: warnings, bought: bought, cost: cost, range: range, total: total,
+      endL: warnings.length ? null : fuel + v.reserveL, longestGap: gap, gapAt: gapAt, usable: st.length, v: v
+    };
+  }
+
+  function gapWarning(cur, pos, reach, st, total, range) {
+    var next = st.filter(function (s) { return s.along > reach; })[0];
+    var gap = (next ? next.along : total) - pos;
+    return "From " + (cur ? esc(cur.name) : "your start") + " (" + km(pos) + " in), the next " + FUEL_NAME[$("fuelType").value] +
+      " is about " + km(gap) + " away, more than your safe range of " + km(range) +
+      ". Carry spare fuel, leave with more in the tank, or check for servos the map doesn't know about.";
+  }
+
+  function renderPlan() {
+    var card = $("planCard");
+    if (!S.current) return;
+    card.classList.remove("hidden");
+    var v = vehicle();
+    $("rangeHint").textContent = v.tank > 0 && v.use > 0
+      ? "Safe range: about " + km((v.tank - v.reserveL) / v.use * 100) + " per tank, keeping " + Math.round(v.reserveL) + " L in reserve."
+      : "";
+    if (!S.servosLoaded) return;
+    var r = planFuel();
+    if (!r) { $("planBody").innerHTML = '<p class="empty">Add your tank size and fuel use to plan fuel stops.</p>'; return; }
+    var people = parseInt($("people").value, 10) || 1;
+    var html = '<div class="plan-sum"><b>' + (r.steps.length ? r.steps.length + " fuel stop" + (r.steps.length > 1 ? "s" : "") : "No fuel stops needed") + "</b>" +
+      (r.cost > 0 ? " · " + aud.format(r.cost) + " at the pump" + (people > 1 ? " (" + aud.format(r.cost / people) + " each)" : "") : "") +
+      "<br>Longest stretch without " + FUEL_NAME[v.type] + ": <b>" + km(r.longestGap) + "</b>" +
+      (r.longestGap > r.range ? " ⚠️" : "") + "</div>";
+    r.warnings.forEach(function (w) { html += '<div class="warn">⚠️ ' + w + "</div>"; });
+    html += '<div class="pstep"><div class="num end">▶</div><div><div class="t">Leave ' + esc(S.from.name) + "</div>" +
+      '<div class="m">' + Math.round(v.startL) + " L in the tank</div></div><div></div></div>";
+    r.steps.forEach(function (st, i) {
+      var s = st.s, own = S.prices[s.id] > 0;
+      html += '<div class="pstep"><div class="num">' + (i + 1) + "</div><div>" +
+        '<div class="t" data-servo="' + s.id + '">' + esc(s.name) + (s.h24 ? '<span class="badge">24/7</span>' : "") +
+        (s.sell === "unknown" ? '<span class="badge warnb">check ' + FUEL_NAME[v.type] + "</span>" : "") + "</div>" +
+        '<div class="m">' + (s.town ? esc(s.town) + " · " : "") + km(s.along) + " in · arrive with ~" + Math.round(st.arriveL) + " L</div></div>" +
+        '<div class="c">' + (st.full ? "Fill up" : "Top up") + "<small>~" + Math.round(st.buy) + " L · " + aud.format(st.cost) + "</small>" +
+        "<small>" + (own ? "$" + st.price.toFixed(2) + "/L (yours)" : "est. $" + st.price.toFixed(2) + "/L") + "</small></div></div>";
+    });
+    if (r.endL != null) {
+      html += '<div class="pstep"><div class="num end">■</div><div><div class="t">Arrive ' + esc(S.to.name) + "</div>" +
+        '<div class="m">About ' + Math.round(r.endL) + " L left</div></div><div></div></div>";
+    }
+    $("planBody").innerHTML = html;
+    drawServos(r);
+  }
+
+  function renderServoList() {
+    var v = vehicle();
+    $("servoCount").textContent = "(" + S.servos.length + ")";
+    if (!S.servos.length) { $("servoList").innerHTML = '<p class="empty">No servos found on this route.</p>'; return; }
+    $("servoList").innerHTML = S.servos.map(function (s) {
+      var sell = sells(s.tags, v.type);
+      return '<div class="srow"><div><div class="name" data-servo="' + s.id + '" style="font-weight:600;font-size:15px;cursor:pointer">' + esc(s.name) +
+        (s.h24 ? '<span class="badge">24/7</span>' : "") +
+        (sell === "no" || (sell === "unknown" && v.type === "lpg") ? '<span class="badge warnb">no ' + FUEL_NAME[v.type] + "</span>" : "") + "</div>" +
+        '<div class="meta">' + (s.town ? esc(s.town) + " · " : "") + km(s.along) + " in</div></div>" +
+        '<input type="number" inputmode="decimal" step="0.01" min="0" data-price="' + s.id + '" value="' + (S.prices[s.id] || "") +
+        '" placeholder="$' + (v.price || 0).toFixed(2) + '" aria-label="Price per litre at ' + esc(s.name) + '"></div>';
+    }).join("");
+  }
+
+  var servoLayerMarkers = {};
+  function drawServos(r) {
+    servoLayer.clearLayers(); servoLayerMarkers = {};
+    var planIds = {};
+    (r ? r.steps : []).forEach(function (st, i) { planIds[st.s.id] = i + 1; });
+    S.servos.forEach(function (s) {
+      var m;
+      if (planIds[s.id]) {
+        m = L.marker([s.lat, s.lon], { icon: L.divIcon({ className: "", html: '<div class="fpin">⛽ ' + planIds[s.id] + "</div>", iconSize: null, iconAnchor: [18, 12] }), zIndexOffset: 500 });
+      } else if (s.ok) {
+        m = L.circleMarker([s.lat, s.lon], { radius: 4, color: "#fff", weight: 1.5, fillColor: "#5a5048", fillOpacity: .9 });
+      } else return;
+      m.bindPopup("<b>" + esc(s.name) + "</b><br><small>" + (s.town ? esc(s.town) + " · " : "") + km(s.along) + " into the trip" + (s.h24 ? " · 24/7" : "") + "</small>");
+      m.addTo(servoLayer); servoLayerMarkers[s.id] = m;
+    });
+  }
+
+  async function loadServos() {
+    S.servosLoaded = false;
+    $("planCard").classList.remove("hidden");
+    $("planBody").innerHTML = '<p class="empty">Finding servos along your route…</p>';
+    try {
+      S.servos = processServos(await getServos());
+      S.servosLoaded = true;
+      renderServoList();
+      renderPlan();
+    } catch (err) {
+      $("planBody").innerHTML = '<p class="empty">' + esc(err.message || "Couldn't load servos.") +
+        ' <button type="button" class="add" id="retryServos">Try again</button></p>';
+    }
+  }
+
+  function categorise(t) {
+    if (t.place) return "town";
+    if (t.tourism === "viewpoint") return "lookout";
+    if (t.tourism === "museum" || t.tourism === "gallery") return "museum";
+    if (t.tourism === "zoo" || t.tourism === "aquarium" || t.tourism === "theme_park") return "family";
+    if (t.waterway === "waterfall" || t.natural) return "nature";
+    if (t.historic) return "history";
+    return "attraction";
+  }
+
+  function processStops(elements, radiusKm) {
+    var base = S.base;
+    var near = thin(base.coords, base.cum, 0.3); // lighter line for distance maths
+    var out = [], seen = {};
+    elements.forEach(function (el) {
+      var lat = el.lat != null ? el.lat : el.center && el.center.lat;
+      var lon = el.lon != null ? el.lon : el.center && el.center.lon;
+      if (lat == null || lon == null || !el.tags || !el.tags.name) return;
+      var name = el.tags.name.trim();
+      var key = name.toLowerCase();
+      var loc = locate([lat, lon], near.coords, near.cum);
+      if (loc.off > radiusKm) return;
+      // Skip the start and finish towns themselves
+      if (loc.along < 2 || loc.along > near.cum[near.cum.length - 1] - 2) { if (el.tags.place) return; }
+      if (seen[key] && Math.abs(seen[key].along - loc.along) < 5) return;
+      var cat = categorise(el.tags);
+      var must = cat !== "town" && !!(el.tags.wikipedia || el.tags.wikidata);
+      var poi = {
+        id: el.type + el.id, name: name, lat: lat, lon: lon, cat: cat, must: must,
+        off: loc.off, along: loc.along,
+        score: (must ? 3 : 0) + (el.tags.wikipedia ? 1 : 0) + (cat === "lookout" || cat === "nature" ? 0.5 : 0) - loc.off / 20
+      };
+      seen[key] = poi;
+      out.push(poi);
+    });
+    // Keep the best ones so the list stays useful on long trips, then order by distance along the route.
+    var towns = out.filter(function (p) { return p.cat === "town"; });
+    var sights = out.filter(function (p) { return p.cat !== "town"; })
+      .sort(function (a, b) { return b.score - a.score; }).slice(0, 80);
+    return sights.concat(towns.slice(0, 40)).sort(function (a, b) { return a.along - b.along; });
+  }
+
+  // ---------- Drawing ----------
+  function endMarker(p, label, color) {
+    return L.circleMarker([p.lat, p.lon], { radius: 9, color: "#fff", weight: 3, fillColor: color, fillOpacity: 1 })
+      .bindTooltip(label + ": " + esc(p.name), { direction: "top" });
+  }
+
+  function drawRoute(fit) {
+    routeLayer.clearLayers();
+    var r = S.current;
+    L.polyline(r.coords, { color: "#2a2420", weight: 8, opacity: .25 }).addTo(routeLayer);
+    L.polyline(r.coords, { color: "#c2522d", weight: 5, opacity: .95 }).addTo(routeLayer);
+    endMarker(S.from, "Start", "#4f6b52").addTo(routeLayer);
+    endMarker(S.to, "Finish", "#2a2420").addTo(routeLayer);
+    if (fit) map.fitBounds(L.latLngBounds(r.coords), { padding: [24, 24] });
+  }
+
+  function popupHtml(p) {
+    var on = !!S.selected[p.id];
+    return "<b>" + esc(p.name) + "</b><br>" + CATS[p.cat].emo + " " + CATS[p.cat].label +
+      (p.must ? ' <span class="badge">Popular</span>' : "") +
+      "<br><small>" + km(p.along) + " into the trip · ~" + (p.off < 1 ? "<1" : Math.round(p.off)) + " km off route</small><br>" +
+      '<button class="add' + (on ? " on" : "") + '" data-add="' + p.id + '">' + (on ? "✓ Added" : "+ Add to trip") + "</button>";
+  }
+
+  function drawStops() {
+    poiLayer.clearLayers(); poiMarkers = {};
+    visibleStops().forEach(function (p) {
+      var on = !!S.selected[p.id];
+      var m = L.circleMarker([p.lat, p.lon], {
+        radius: on ? 9 : p.must ? 7 : 5, color: "#fff", weight: 2,
+        fillColor: on ? "#c2522d" : CATS[p.cat].color, fillOpacity: .95
+      }).bindPopup(function () { return popupHtml(p); });
+      m.addTo(poiLayer); poiMarkers[p.id] = m;
+    });
+  }
+
+  function visibleStops() {
+    return S.pois.filter(function (p) {
+      if (S.selected[p.id]) return true;
+      if (S.filter === "all") return true;
+      if (S.filter === "must") return p.must;
+      return p.cat === S.filter;
+    });
+  }
+
+  function renderChips() {
+    var counts = { all: S.pois.length, must: 0 };
+    S.pois.forEach(function (p) { counts[p.cat] = (counts[p.cat] || 0) + 1; if (p.must) counts.must++; });
+    var keys = ["all", "must", "town", "lookout", "nature", "attraction", "museum", "history", "family"];
+    $("chips").innerHTML = keys.filter(function (k) { return counts[k]; }).map(function (k) {
+      var label = k === "all" ? "All" : CATS[k].emo + " " + CATS[k].label;
+      return '<button type="button" class="chip" data-filter="' + k + '" aria-pressed="' + (S.filter === k) + '">' + label + " " + counts[k] + "</button>";
+    }).join("");
+  }
+
+  function renderList() {
+    var list = visibleStops();
+    if (!S.pois.length) { $("stopList").innerHTML = '<p class="empty">No stops found this close to the route. Try a wider distance.</p>'; return; }
+    $("stopList").innerHTML = list.map(function (p) {
+      var on = !!S.selected[p.id];
+      return '<div class="stop"><div class="emo">' + CATS[p.cat].emo + "</div><div>" +
+        '<div class="name" data-view="' + p.id + '">' + esc(p.name) + (p.must ? '<span class="badge">Popular</span>' : "") + "</div>" +
+        '<div class="meta">' + km(p.along) + " in · ~" + (p.off < 1 ? "<1" : Math.round(p.off)) + " km off route</div></div>" +
+        '<button type="button" class="add' + (on ? " on" : "") + '" data-add="' + p.id + '">' + (on ? "✓ Added" : "+ Add") + "</button></div>";
+    }).join("");
+  }
+
+  function renderSummary() {
+    var r = S.current, b = S.base;
+    var econ = parseFloat($("economy").value) || 0;
+    var price = parseFloat($("price").value) || 0;
+    var tow = parseFloat($("tow").value) || 0;
+    var people = parseInt($("people").value, 10) || 1;
+    var litres = r.distance * econ * (1 + tow) / 100;
+    var cost = litres * price;
+    var stops = selectedStops();
+
+    $("routeName").textContent = S.from.name + " → " + S.to.name + (stops.length ? " · " + stops.length + " stop" + (stops.length > 1 ? "s" : "") + " added" : "");
+    $("dist").textContent = km(r.distance);
+    $("time").textContent = dur(r.duration);
+    var extraKm = r.distance - b.distance, extraT = r.duration - b.duration;
+    $("distExtra").textContent = stops.length && extraKm > 0.5 ? "+" + km(extraKm) + " for stops" : "";
+    $("timeExtra").textContent = stops.length && extraT > 60 ? "+" + dur(extraT) + " for stops" : "";
+    $("cost").textContent = cost > 0 ? aud.format(cost) : "–";
+    $("litres").textContent = cost > 0 ? (people > 1 ? aud.format(cost / people) + " each" : Math.round(litres) + " L") : "Set fuel price";
+    $("breaks").textContent = String(Math.floor(r.duration / 7200));
+
+    // Google Maps hand-off for turn-by-turn navigation
+    var u = "https://www.google.com/maps/dir/?api=1&travelmode=driving" +
+      "&origin=" + S.from.lat + "," + S.from.lon + "&destination=" + S.to.lat + "," + S.to.lon;
+    if (stops.length) u += "&waypoints=" + encodeURIComponent(stops.slice(0, 9).map(function (p) { return p.lat + "," + p.lon; }).join("|"));
+    $("gmaps").href = u;
+    save();
+  }
+
+  function selectedStops() {
+    return S.pois.filter(function (p) { return S.selected[p.id]; }).sort(function (a, b) { return a.along - b.along; });
+  }
+
+  // ---------- Flow ----------
+  var busy = false;
+  async function plan(e) {
+    if (e) e.preventDefault();
+    if (busy) return;
+    var fromQ = $("from").value.trim(), toQ = $("to").value.trim();
+    if (!fromQ || !toQ) { setStatus("Add where you're starting and where you're going.", true); return; }
+    busy = true; $("go").disabled = true;
+    try {
+      setStatus("Finding places…");
+      S.from = (fromQ === "My location" && S.geoFrom) ? S.geoFrom : await geocode(fromQ);
+      if (!(fromQ === "My location" && S.geoFrom)) await sleep(1100); // be polite to the free place-search service
+      S.to = await geocode(toQ);
+      setStatus("Working out the route…");
+      S.base = await getRoute([S.from, S.to]);
+      S.current = S.base;
+      S.selected = {}; S.pois = []; S.filter = "all";
+      drawRoute(true); poiLayer.clearLayers();
+      $("summary").classList.remove("hidden");
+      renderSummary();
+      setStatus("");
+      S.prices = {};
+      servoLayer.clearLayers();
+      loadServos().then(loadStops);
+    } catch (err) {
+      setStatus(err.message || "Something went wrong. Try again.", true);
+    } finally {
+      busy = false; $("go").disabled = false;
+    }
+  }
+
+  async function loadStops() {
+    var card = $("stopsCard");
+    card.classList.remove("hidden");
+    $("chips").innerHTML = "";
+    $("stopList").innerHTML = '<p class="empty">Finding stops along your route…</p>';
+    var radius = parseFloat($("radius").value);
+    try {
+      var els = await getStops(radius);
+      var keep = S.pois.filter(function (p) { return S.selected[p.id]; });
+      S.pois = processStops(els, radius);
+      keep.forEach(function (k) { if (!S.pois.some(function (p) { return p.id === k.id; })) S.pois.push(k); });
+      S.pois.sort(function (a, b) { return a.along - b.along; });
+      renderChips(); renderList(); drawStops();
+    } catch (err) {
+      $("stopList").innerHTML = '<p class="empty">' + esc(err.message || "Couldn't load stops.") +
+        ' <button type="button" class="add" id="retryStops">Try again</button></p>';
+    }
+  }
+
+  async function toggleStop(id) {
+    if (busy) return;
+    S.selected[id] = !S.selected[id];
+    if (!S.selected[id]) delete S.selected[id];
+    refreshStopUI(id);
+    busy = true;
+    try {
+      var pts = [S.from].concat(selectedStops(), [S.to]);
+      S.current = pts.length > 2 ? await getRoute(pts) : S.base;
+      drawRoute(false);
+      renderSummary();
+      loadServos();
+    } catch (err) {
+      delete S.selected[id];
+      refreshStopUI(id);
+      setStatus("Couldn't add that stop to the route. Try again.", true);
+    } finally { busy = false; }
+  }
+
+  function refreshStopUI(id) {
+    renderList(); drawStops();
+    var m = poiMarkers[id];
+    if (m && m.isPopupOpen && m.isPopupOpen()) m.setPopupContent(popupHtml(S.pois.find(function (p) { return p.id === id; })));
+  }
+
+  // ---------- Events ----------
+  $("tripForm").addEventListener("submit", plan);
+  $("radius").addEventListener("change", function () { if (S.base) loadStops(); });
+  ["economy", "price", "tow", "people", "tank", "fuelType", "startFuel", "reserve"].forEach(function (id) {
+    var h = function () {
+      if (S.current) { renderSummary(); renderPlan(); if (S.servosLoaded && (id === "fuelType" || id === "price")) renderServoList(); }
+      else { save(); renderRangeOnly(); }
+    };
+    $(id).addEventListener("input", h); $(id).addEventListener("change", h);
+  });
+  function renderRangeOnly() {
+    var v = vehicle();
+    $("rangeHint").textContent = v.tank > 0 && v.use > 0
+      ? "Safe range: about " + km((v.tank - v.reserveL) / v.use * 100) + " per tank, keeping " + Math.round(v.reserveL) + " L in reserve." : "";
+  }
+  document.addEventListener("input", function (e) {
+    var id = e.target && e.target.dataset && e.target.dataset.price;
+    if (!id) return;
+    var val = parseFloat(e.target.value);
+    if (val > 0) S.prices[id] = val; else delete S.prices[id];
+    renderPlan();
+  });
+
+  document.addEventListener("click", function (e) {
+    var t = e.target.closest("[data-add],[data-view],[data-filter],[data-servo],#retryStops,#retryServos");
+    if (!t) return;
+    if (t.id === "retryStops") { loadStops(); return; }
+    if (t.id === "retryServos") { loadServos(); return; }
+    if (t.dataset.servo) {
+      var sv = S.servos.find(function (x) { return x.id === t.dataset.servo; });
+      if (sv) {
+        map.setView([sv.lat, sv.lon], 14);
+        if (servoLayerMarkers[sv.id]) servoLayerMarkers[sv.id].openPopup();
+        if (window.innerWidth < 900) window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+      return;
+    }
+    if (t.dataset.filter) { S.filter = t.dataset.filter; renderChips(); renderList(); drawStops(); return; }
+    if (t.dataset.add) { toggleStop(t.dataset.add); return; }
+    if (t.dataset.view) {
+      var p = S.pois.find(function (x) { return x.id === t.dataset.view; });
+      if (p) {
+        map.setView([p.lat, p.lon], 12);
+        if (poiMarkers[p.id]) poiMarkers[p.id].openPopup();
+        if (window.innerWidth < 900) window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    }
+  });
+
+  $("locate").addEventListener("click", function () {
+    if (!navigator.geolocation) { setStatus("Your browser can't share location.", true); return; }
+    setStatus("Getting your location…");
+    navigator.geolocation.getCurrentPosition(function (pos) {
+      S.geoFrom = { lat: pos.coords.latitude, lon: pos.coords.longitude, name: "My location" };
+      $("from").value = "My location";
+      setStatus("");
+    }, function () { setStatus("Couldn't get your location. Type a town instead.", true); }, { timeout: 10000 });
+  });
+  $("from").addEventListener("input", function () { if ($("from").value !== "My location") S.geoFrom = null; });
+
+  $("copy").addEventListener("click", function () {
+    if (!S.current) return;
+    var r = S.current, stops = selectedStops();
+    var txt = "🚗 " + S.from.name + " → " + S.to.name + "\n" + km(r.distance) + " · about " + dur(r.duration) + " driving";
+    var cost = $("cost").textContent;
+    if (cost !== "–") txt += "\n⛽ Fuel: " + cost + ($("litres").textContent.indexOf("each") > -1 ? " (" + $("litres").textContent + ")" : "");
+    if (stops.length) txt += "\n📍 Stops: " + stops.map(function (p) { return p.name; }).join(", ");
+    txt += "\nGoogle Maps: " + $("gmaps").href;
+    var done = function (m) { $("copyStatus").textContent = m; setTimeout(function () { $("copyStatus").textContent = ""; }, 2500); };
+    try { navigator.clipboard.writeText(txt).then(function () { done("Copied, paste it in the group chat."); }, function () { done("Couldn't copy."); }); }
+    catch (e) { done("Couldn't copy."); }
+  });
+
+  // ---------- Remember settings on this device ----------
+  var KEY = "roadTripPlanner.v1";
+  function save() {
+    try {
+      localStorage.setItem(KEY, JSON.stringify({
+        from: $("from").value === "My location" ? "" : $("from").value, to: $("to").value,
+        economy: $("economy").value, price: $("price").value, people: $("people").value, tow: $("tow").value,
+        tank: $("tank").value, fuelType: $("fuelType").value, startFuel: $("startFuel").value, reserve: $("reserve").value
+      }));
+    } catch (e) {}
+  }
+  try {
+    var s = JSON.parse(localStorage.getItem(KEY) || "null");
+    if (s) {
+      if (s.from) $("from").value = s.from;
+      if (s.to) $("to").value = s.to;
+      if (s.economy) $("economy").value = s.economy;
+      if (s.price) $("price").value = s.price;
+      if (s.people) $("people").value = s.people;
+      if (s.tow) $("tow").value = s.tow;
+      ["tank", "fuelType", "startFuel", "reserve"].forEach(function (k) { if (s[k]) $(k).value = s[k]; });
+    }
+  } catch (e) {}
+  renderRangeOnly();
+})();
+</script>
+</body>
+</html>
