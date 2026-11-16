@@ -271,13 +271,14 @@
   };
 
   // ---------- Map ----------
-  var map = L.map("map", { zoomControl: true }).setView([-28.5, 134], 4);
+  var map = L.map("map", { zoomControl: true, preferCanvas: true }).setView([-28.5, 134], 4);
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
   }).addTo(map);
   var routeLayer = L.layerGroup().addTo(map);
   var poiLayer = L.layerGroup().addTo(map);
+  var allServoLayer = L.layerGroup();
   var servoLayer = L.layerGroup().addTo(map);
   var poiMarkers = {};
 
@@ -353,43 +354,145 @@
     return { coords: coords, cum: cumulative(coords), distance: rt.distance / 1000, duration: rt.duration };
   }
 
-  // Sample a route for an Overpass "around" query: enough points to follow the road, few enough to stay fast.
-  function queryLine(route) {
-    var total = route.cum[route.cum.length - 1];
-    var step = Math.max(3, total / 140);
-    return thin(route.coords, route.cum, step).coords
-      .map(function (c) { return c[0].toFixed(4) + "," + c[1].toFixed(4); }).join(",");
-  }
+  var OVERPASS_URLS = [OVERPASS_URL, "https://overpass.private.coffee/api/interpreter"];
 
   async function overpass(q, busyMsg) {
-    var res = await fetch(OVERPASS_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-      body: "data=" + encodeURIComponent(q)
-    });
-    if (!res.ok) throw new Error(busyMsg);
-    var j = await res.json();
-    return j.elements || [];
+    for (var i = 0; i < OVERPASS_URLS.length; i++) {
+      try {
+        var res = await fetch(OVERPASS_URLS[i], {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+          body: "data=" + encodeURIComponent(q)
+        });
+        if (!res.ok) continue;
+        var j = await res.json();
+        // Overpass reports timeouts inside a normal-looking response; treat those as failures, not "nothing found"
+        if (j.remark && /timed out|runtime error|out of memory/i.test(j.remark)) continue;
+        return j.elements || [];
+      } catch (e) { /* try the next server */ }
+    }
+    throw new Error(busyMsg);
   }
 
-  async function getServos() {
-    var q = "[out:json][timeout:60];(nwr[\"amenity\"=\"fuel\"](around:1500," + queryLine(S.current) + "););out center tags 900;";
-    return overpass(q, "The servo finder is busy right now.");
+  // Boxes that hug the route (south, west, north, east), padded by padKm.
+  function corridorBoxes(route, padKm, maxBoxes) {
+    var total = route.cum[route.cum.length - 1];
+    var chunk = Math.max(30, total / maxBoxes), next = chunk, boxes = [], b = null;
+    var padLat = padKm / 110.57;
+    for (var i = 0; i < route.coords.length; i++) {
+      var c = route.coords[i];
+      if (!b) b = [c[0], c[1], c[0], c[1]];
+      b[0] = Math.min(b[0], c[0]); b[1] = Math.min(b[1], c[1]); b[2] = Math.max(b[2], c[0]); b[3] = Math.max(b[3], c[1]);
+      if (route.cum[i] >= next || i === route.coords.length - 1) {
+        var padLon = padKm / (111.32 * Math.cos(c[0] * Math.PI / 180));
+        boxes.push([b[0] - padLat, b[1] - padLon, b[2] + padLat, b[3] + padLon].map(function (n) { return n.toFixed(4); }).join(","));
+        b = [c[0], c[1], c[0], c[1]];
+        next = route.cum[i] + chunk;
+      }
+    }
+    return boxes;
   }
 
   async function getStops(radiusKm) {
-    var line = queryLine(S.base);
-    var R = Math.round(radiusKm * 1000);
-    var around = "(around:" + R + "," + line + ")";
-    var q = "[out:json][timeout:60];(" +
-      'nwr["tourism"~"^(attraction|viewpoint|museum|gallery|zoo|aquarium|theme_park)$"]["name"]' + around + ";" +
-      'nwr["historic"~"^(monument|memorial|ruins|heritage|castle|fort)$"]["name"]["wikidata"]' + around + ";" +
-      'nwr["waterway"="waterfall"]["name"]' + around + ";" +
-      'nwr["natural"~"^(beach|cave_entrance|peak)$"]["name"]["wikidata"]' + around + ";" +
-      'node["place"~"^(town|city)$"]["name"]' + around + ";" +
-      ");out center tags 600;";
+    var boxes = corridorBoxes(S.base, radiusKm, 30);
+    var q = "[out:json][timeout:40];(" + boxes.map(function (bb) {
+      return 'nwr["tourism"~"^(attraction|viewpoint|museum|gallery|zoo|aquarium|theme_park)$"]["name"](' + bb + ");" +
+        'nwr["historic"~"^(monument|memorial|ruins|heritage|castle|fort)$"]["name"]["wikidata"](' + bb + ");" +
+        'nwr["waterway"="waterfall"]["name"](' + bb + ");" +
+        'nwr["natural"~"^(beach|cave_entrance|peak)$"]["name"]["wikidata"](' + bb + ");" +
+        'node["place"~"^(town|city)$"]["name"](' + bb + ");";
+    }).join("") + ");out center tags;";
     return overpass(q, "The stops finder is busy right now.");
   }
+
+  // ---------- Every servo, cached in half-degree map cells ----------
+  var CELL = 0.5, cells = {}, servoIndex = {}, nearKeys = {}, fetchChain = Promise.resolve();
+  function cellOf(lat, lon) { return Math.floor(lat / CELL) + ":" + Math.floor(lon / CELL); }
+  function cellBox(k) { var p = k.split(":").map(Number); return [p[0] * CELL, p[1] * CELL, (p[0] + 1) * CELL, (p[1] + 1) * CELL].join(","); }
+
+  function addServoEl(el) {
+    var lat = el.lat != null ? el.lat : el.center && el.center.lat;
+    var lon = el.lon != null ? el.lon : el.center && el.center.lon;
+    if (lat == null || lon == null) return;
+    var id = el.type + el.id;
+    if (servoIndex[id]) return;
+    var nk = lat.toFixed(3) + "," + lon.toFixed(3); // same servo mapped as a point and a building
+    if (nearKeys[nk]) return;
+    nearKeys[nk] = 1;
+    var t = el.tags || {}, brand = t.brand || "", name = t.name || brand || "Servo";
+    if (brand && name.toLowerCase().indexOf(brand.toLowerCase()) === -1) name = brand + " " + name;
+    servoIndex[id] = { id: id, name: name, lat: lat, lon: lon, tags: t, town: t["addr:suburb"] || t["addr:city"] || "", h24: t.opening_hours === "24/7" };
+  }
+
+  // Load the servos for a set of cells (skipping ones already loaded), a batch at a time so the server isn't swamped.
+  function fetchCells(keys) {
+    var need = keys.filter(function (k) { return !cells[k]; });
+    for (var i = 0; i < need.length; i += 30) {
+      (function (batch) {
+        var q = "[out:json][timeout:30];(" + batch.map(function (k) { return 'nwr["amenity"="fuel"](' + cellBox(k) + ");"; }).join("") + ");out center tags;";
+        var p = fetchChain.then(function () { return overpass(q, "The servo finder is busy right now."); })
+          .then(function (els) { els.forEach(addServoEl); },
+                function (e) { batch.forEach(function (k) { delete cells[k]; }); throw e; });
+        fetchChain = p.catch(function () {});
+        batch.forEach(function (k) { cells[k] = p; });
+      })(need.slice(i, i + 30));
+    }
+    return Promise.all(keys.map(function (k) { return cells[k]; }));
+  }
+
+  function routeCells(route) {
+    var keys = {}, pad = 0.02;
+    thin(route.coords, route.cum, 3).coords.forEach(function (c) {
+      [-pad, pad].forEach(function (a) { [-pad, pad].forEach(function (b) { keys[cellOf(c[0] + a, c[1] + b)] = 1; }); });
+    });
+    return Object.keys(keys);
+  }
+
+  function fuelsSold(t) {
+    var map = { "fuel:octane_91": "ULP", "fuel:e10": "E10", "fuel:octane_95": "95", "fuel:octane_98": "98", "fuel:diesel": "Diesel", "fuel:lpg": "LPG" };
+    return Object.keys(map).filter(function (k) { return t[k] === "yes"; }).map(function (k) { return map[k]; }).join(", ");
+  }
+  function servoPopup(s, extra) {
+    var f = fuelsSold(s.tags);
+    return "<b>" + esc(s.name) + "</b><br><small>" + (s.town ? esc(s.town) : "") + (s.h24 ? (s.town ? " · " : "") + "Open 24/7" : "") +
+      (f ? "<br>Sells: " + f : "") + (extra ? "<br>" + extra : "") + "</small>";
+  }
+
+  // Grey dots for every known servo that isn't one of the route's servos
+  var allMarkers = {};
+  function syncAllServos() {
+    var onRoute = {};
+    S.servos.forEach(function (s) { onRoute[s.id] = 1; });
+    Object.keys(servoIndex).forEach(function (id) {
+      if (onRoute[id]) {
+        if (allMarkers[id]) { allServoLayer.removeLayer(allMarkers[id]); delete allMarkers[id]; }
+        return;
+      }
+      if (allMarkers[id]) return;
+      var s = servoIndex[id];
+      allMarkers[id] = L.circleMarker([s.lat, s.lon], { radius: 4, color: "#fff", weight: 1, fillColor: "#8c8580", fillOpacity: .9 })
+        .bindPopup(function () { return servoPopup(s, "Off your route"); }).addTo(allServoLayer);
+    });
+  }
+
+  // Show every servo once zoomed in, loading the area you're looking at
+  var SHOW_ALL_ZOOM = 9, viewTimer = null;
+  function onView() {
+    var z = map.getZoom();
+    if (z >= SHOW_ALL_ZOOM) { if (!map.hasLayer(allServoLayer)) allServoLayer.addTo(map); }
+    else if (map.hasLayer(allServoLayer)) map.removeLayer(allServoLayer);
+    if (z < SHOW_ALL_ZOOM) return;
+    clearTimeout(viewTimer);
+    viewTimer = setTimeout(function () {
+      var b = map.getBounds(), keys = {};
+      for (var la = Math.floor(b.getSouth() / CELL); la <= Math.floor(b.getNorth() / CELL); la++)
+        for (var lo = Math.floor(b.getWest() / CELL); lo <= Math.floor(b.getEast() / CELL); lo++) keys[la + ":" + lo] = 1;
+      var list = Object.keys(keys);
+      if (list.length > 16) return;
+      fetchCells(list).then(syncAllServos, function () {});
+    }, 400);
+  }
+  map.on("moveend zoomend", onView);
 
   // ---------- Servos & fuel plan ----------
   var FUEL_TAG = { ulp: "fuel:octane_91", e10: "fuel:e10", p95: "fuel:octane_95", p98: "fuel:octane_98", diesel: "fuel:diesel", lpg: "fuel:lpg" };
@@ -413,25 +516,16 @@
     return "unknown";
   }
 
-  function processServos(elements) {
+  function processServos() {
     var r = S.current, near = thin(r.coords, r.cum, 0.3), out = [];
-    elements.forEach(function (el) {
-      var lat = el.lat != null ? el.lat : el.center && el.center.lat;
-      var lon = el.lon != null ? el.lon : el.center && el.center.lon;
-      if (lat == null || lon == null) return;
-      var t = el.tags || {};
-      var loc = locate([lat, lon], near.coords, near.cum);
+    var mnLa = Infinity, mnLo = Infinity, mxLa = -Infinity, mxLo = -Infinity;
+    r.coords.forEach(function (c) { mnLa = Math.min(mnLa, c[0]); mxLa = Math.max(mxLa, c[0]); mnLo = Math.min(mnLo, c[1]); mxLo = Math.max(mxLo, c[1]); });
+    Object.keys(servoIndex).forEach(function (id) {
+      var s = servoIndex[id];
+      if (s.lat < mnLa - .05 || s.lat > mxLa + .05 || s.lon < mnLo - .05 || s.lon > mxLo + .05) return;
+      var loc = locate([s.lat, s.lon], near.coords, near.cum);
       if (loc.off > 1.5) return;
-      // Same servo mapped twice (point + building outline): keep one
-      if (out.some(function (s) { return Math.abs(s.lat - lat) < 0.002 && Math.abs(s.lon - lon) < 0.002; })) return;
-      var brand = t.brand || "";
-      var name = t.name || brand || "Servo";
-      if (brand && name.toLowerCase().indexOf(brand.toLowerCase()) === -1) name = brand + " " + name;
-      out.push({
-        id: el.type + el.id, name: name, lat: lat, lon: lon, tags: t,
-        town: t["addr:suburb"] || t["addr:city"] || "",
-        h24: t.opening_hours === "24/7", along: loc.along, off: loc.off
-      });
+      out.push({ id: s.id, name: s.name, lat: s.lat, lon: s.lon, tags: s.tags, town: s.town, h24: s.h24, along: loc.along, off: loc.off });
     });
     return out.sort(function (a, b) { return a.along - b.along; });
   }
@@ -569,9 +663,11 @@
       if (planIds[s.id]) {
         m = L.marker([s.lat, s.lon], { icon: L.divIcon({ className: "", html: '<div class="fpin">⛽ ' + planIds[s.id] + "</div>", iconSize: null, iconAnchor: [18, 12] }), zIndexOffset: 500 });
       } else if (s.ok) {
-        m = L.circleMarker([s.lat, s.lon], { radius: 4, color: "#fff", weight: 1.5, fillColor: "#5a5048", fillOpacity: .9 });
-      } else return;
-      m.bindPopup("<b>" + esc(s.name) + "</b><br><small>" + (s.town ? esc(s.town) + " · " : "") + km(s.along) + " into the trip" + (s.h24 ? " · 24/7" : "") + "</small>");
+        m = L.circleMarker([s.lat, s.lon], { radius: 5, color: "#fff", weight: 1.5, fillColor: "#1a56c4", fillOpacity: .95 });
+      } else {
+        m = L.circleMarker([s.lat, s.lon], { radius: 4, color: "#fff", weight: 1, fillColor: "#8c8580", fillOpacity: .9 });
+      }
+      m.bindPopup(servoPopup(s, km(s.along) + " into the trip" + (planIds[s.id] ? " · fuel stop " + planIds[s.id] : "")));
       m.addTo(servoLayer); servoLayerMarkers[s.id] = m;
     });
   }
@@ -581,8 +677,10 @@
     $("planCard").classList.remove("hidden");
     $("planBody").innerHTML = '<p class="empty">Finding servos along your route…</p>';
     try {
-      S.servos = processServos(await getServos());
+      await fetchCells(routeCells(S.current));
+      S.servos = processServos();
       S.servosLoaded = true;
+      syncAllServos();
       renderServoList();
       renderPlan();
     } catch (err) {
@@ -642,8 +740,8 @@
   function drawRoute(fit) {
     routeLayer.clearLayers();
     var r = S.current;
-    L.polyline(r.coords, { color: "#2a2420", weight: 8, opacity: .25 }).addTo(routeLayer);
-    L.polyline(r.coords, { color: "#c2522d", weight: 5, opacity: .95 }).addTo(routeLayer);
+    L.polyline(r.coords, { color: "#1a56c4", weight: 9, opacity: 1, lineJoin: "round" }).addTo(routeLayer);
+    L.polyline(r.coords, { color: "#4c8df6", weight: 6, opacity: 1, lineJoin: "round" }).addTo(routeLayer);
     endMarker(S.from, "Start", "#4f6b52").addTo(routeLayer);
     endMarker(S.to, "Finish", "#2a2420").addTo(routeLayer);
     if (fit) map.fitBounds(L.latLngBounds(r.coords), { padding: [24, 24] });
