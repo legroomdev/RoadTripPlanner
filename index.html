@@ -85,6 +85,15 @@
   .empty { color: var(--muted); font-size: 14px; padding: 6px 0; }
   .hidden { display: none !important; }
 
+  .ac { position: relative; }
+  .ac-list { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 50; margin: 0; padding: 4px 0; list-style: none;
+    background: #fff; border: 1.5px solid var(--line); border-radius: 12px; box-shadow: 0 10px 24px rgba(42,36,32,.15); max-height: 300px; overflow-y: auto; }
+  .ac-list li { padding: 9px 12px; cursor: pointer; line-height: 1.3; }
+  .ac-list li + li { border-top: 1px solid #f1e8dc; }
+  .ac-list li:active, .ac-list li.hl { background: #f6efe4; }
+  .ac-list b { display: block; font-size: 15px; font-weight: 600; }
+  .ac-list small { color: var(--muted); font-size: 13px; }
+  .addr { font-size: 13px; color: var(--ink); }
   .hint { font-size: 13px; color: var(--muted); margin: 10px 0 0; }
   .plan-sum { font-size: 14px; background: #f3e9db; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
   .plan-sum b { font-size: 16px; }
@@ -123,13 +132,19 @@
       <div class="field">
         <label for="from">Starting from</label>
         <div class="with-btn">
-          <input id="from" type="text" placeholder="e.g. Adelaide" enterkeyhint="next">
+          <div class="ac">
+            <input id="from" type="text" placeholder="Address, place or town" enterkeyhint="next" role="combobox" aria-autocomplete="list" aria-controls="fromList">
+            <ul class="ac-list" id="fromList" role="listbox" hidden></ul>
+          </div>
           <button type="button" class="icon-btn" id="locate" title="Use my location">📍 Me</button>
         </div>
       </div>
       <div class="field">
         <label for="to">Going to</label>
-        <input id="to" type="text" placeholder="e.g. Melbourne" enterkeyhint="go">
+        <div class="ac">
+          <input id="to" type="text" placeholder="Address, place or town" enterkeyhint="go" role="combobox" aria-autocomplete="list" aria-controls="toList">
+          <ul class="ac-list" id="toList" role="listbox" hidden></ul>
+        </div>
       </div>
       <button class="btn" id="go" type="submit">Plan my trip</button>
       <p class="status" id="status" aria-live="polite"></p>
@@ -332,14 +347,92 @@
   }
 
   // ---------- Services ----------
+  var STATE_ABBR = { "South Australia": "SA", "Victoria": "VIC", "New South Wales": "NSW", "Queensland": "QLD", "Western Australia": "WA",
+    "Tasmania": "TAS", "Northern Territory": "NT", "Australian Capital Territory": "ACT" };
+  function abbr(st) { return STATE_ABBR[st] || st || ""; }
+
+  // Fallback when nothing was picked from the suggestions
   async function geocode(q) {
-    var url = GEOCODE_URL + "?format=jsonv2&limit=1&countrycodes=au&q=" + encodeURIComponent(q);
+    var url = GEOCODE_URL + "?format=jsonv2&limit=1&addressdetails=1&countrycodes=au&q=" + encodeURIComponent(q);
     var res = await fetch(url, { headers: { "Accept-Language": "en-AU" } });
     if (!res.ok) throw new Error("Place search is busy. Give it a few seconds and try again.");
     var j = await res.json();
-    if (!j.length) throw new Error("Couldn't find \"" + q + "\" in Australia. Try adding the state, e.g. \"Bright VIC\".");
-    var name = j[0].name || String(j[0].display_name).split(",")[0];
+    if (!j.length) throw new Error("Couldn't find \"" + q + "\" in Australia. Pick an option from the list as you type, or add the suburb and state.");
+    var a = j[0].address || {};
+    var street = [a.house_number, a.road].filter(Boolean).join(" ");
+    var town = a.suburb || a.town || a.city || a.village || a.hamlet || "";
+    var name = (j[0].name && j[0].name !== a.road ? j[0].name : street) || town || String(j[0].display_name).split(",")[0];
+    if (town && name !== town) name += ", " + town;
     return { lat: +j[0].lat, lon: +j[0].lon, name: name };
+  }
+
+  // Suggestions as you type: addresses, streets, businesses and towns (Photon, built on OpenStreetMap)
+  var PHOTON_URL = "https://photon.komoot.io/api/";
+  function photonLabel(pr) {
+    var street = [pr.housenumber, pr.street].filter(Boolean).join(" ");
+    var title = pr.name && pr.name !== pr.street ? pr.name : (street || pr.name || "");
+    var town = pr.city || pr.town || pr.village || pr.district || pr.locality || pr.county || "";
+    var sub = [];
+    if (pr.name && pr.name !== pr.street && street) sub.push(street);
+    if (town && town !== title) sub.push(town);
+    var st = [abbr(pr.state), pr.postcode].filter(Boolean).join(" ");
+    if (st) sub.push(st);
+    return { title: title, sub: sub.join(", "), short: title + (town && town !== title ? ", " + town : "") };
+  }
+
+  var picks = { from: null, to: null };
+  function setupSuggest(key) {
+    var input = $(key), list = $(key + "List"), timer = null, ctrl = null, feats = [], hl = -1;
+    function hide() { list.hidden = true; hl = -1; }
+    function choose(i) {
+      var f = feats[i]; if (!f) return;
+      var lab = photonLabel(f.properties);
+      picks[key] = { lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0], name: lab.short, text: lab.short };
+      input.value = lab.short;
+      if (key === "from") S.geoFrom = null;
+      hide(); save();
+    }
+    async function search(q) {
+      try {
+        if (ctrl) ctrl.abort();
+        ctrl = new AbortController();
+        var c = map.getCenter();
+        var url = PHOTON_URL + "?limit=7&lang=en&bbox=112.9,-43.7,153.7,-10.6&lat=" + c.lat.toFixed(3) + "&lon=" + c.lng.toFixed(3) +
+          "&q=" + encodeURIComponent(q);
+        var res = await fetch(url, { signal: ctrl.signal });
+        var j = await res.json();
+        feats = (j.features || []).filter(function (f) { return f.properties && f.properties.countrycode === "AU"; });
+        hl = -1;
+        list.innerHTML = feats.map(function (f, i) {
+          var lab = photonLabel(f.properties);
+          return '<li role="option" data-i="' + i + '"><b>' + esc(lab.title) + "</b><small>" + esc(lab.sub) + "</small></li>";
+        }).join("");
+        list.hidden = !feats.length || document.activeElement !== input;
+      } catch (e) { /* aborted or offline: keep typing works with the fallback search */ }
+    }
+    input.addEventListener("input", function () {
+      picks[key] = null;
+      clearTimeout(timer);
+      var q = input.value.trim();
+      if (q.length < 3 || q === "My location") { hide(); return; }
+      timer = setTimeout(function () { search(q); }, 300);
+    });
+    input.addEventListener("keydown", function (e) {
+      if (list.hidden) return;
+      var items = list.querySelectorAll("li");
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        hl = (hl + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+        items.forEach(function (li, i) { li.classList.toggle("hl", i === hl); });
+      } else if (e.key === "Enter" && hl >= 0) { e.preventDefault(); choose(hl); }
+      else if (e.key === "Escape") hide();
+    });
+    // pointerdown fires before the input loses focus, so the tap always lands
+    list.addEventListener("pointerdown", function (e) {
+      var li = e.target.closest("li"); if (!li) return;
+      e.preventDefault(); choose(+li.dataset.i);
+    });
+    input.addEventListener("blur", function () { setTimeout(hide, 150); });
   }
 
   async function getRoute(points) {
@@ -532,8 +625,9 @@
 
   function servoPrice(s, v) { return S.prices[s.id] > 0 ? S.prices[s.id] : v.price; }
 
-  // Classic fuel-stop problem, greedy: from each servo, if a cheaper one is in range, buy just enough to get there;
-  // otherwise fill up and move to the cheapest servo in range (furthest one on a tie, to keep stops down).
+  // Every stop is a fill to full. Pick the stops that keep you above your reserve with the fewest stops,
+  // and favour cheaper servos: each leg's fuel is costed at the servo you filled up at before it.
+  var STOP_PENALTY = 4; // $-equivalent per extra stop, so it won't add a stop just to save a few cents
   function planFuel() {
     var v = vehicle();
     if (!(v.tank > 0) || !(v.use > 0) || !S.current) return null;
@@ -545,53 +639,84 @@
       s.sell = sell;
       s.ok = sell === "yes" || (sell === "unknown" && v.type !== "lpg");
     });
-    var st = S.servos.filter(function (s) { return s.ok; });
+    var st = S.servos.filter(function (s) { return s.ok && s.along > 0.5 && s.along < total - 0.5; });
     var price = function (s) { return servoPrice(s, v); };
-    var fuel = Math.max(0, v.startL - v.reserveL); // litres above the reserve
-    var pos = 0, cur = null, steps = [], warnings = [], bought = 0, cost = 0, guard = 0;
-
-    while (guard++ < 400) {
-      var reach = pos + (cur ? range : fuel / v.use * 100);
-      var cands = st.filter(function (s) { return s.along > pos + 0.05 && s.along <= reach; });
-      var bestOf = function (list) {
-        return list.reduce(function (b, s) { return (price(s) < price(b) - 1e-9 || (Math.abs(price(s) - price(b)) < 1e-9 && s.along > b.along)) ? s : b; });
-      };
-      if (!cur) { // at the start, with whatever is in the tank
-        if (total <= reach) break;
-        if (!cands.length) { warnings.push(gapWarning(null, pos, reach, st, total, range)); break; }
-        var first = bestOf(cands);
-        fuel -= L(first.along - pos); pos = first.along; cur = first;
-        continue;
+    var nodes = [{ along: 0, start: true }].concat(st, [{ along: total, end: true }]);
+    var n = nodes.length, best = [], prev = [];
+    for (var k = 0; k < n; k++) { best.push(Infinity); prev.push(-1); }
+    best[0] = 0;
+    var startReach = Math.max(0, v.startL - v.reserveL) / v.use * 100;
+    for (var i = 0; i < n - 1; i++) {
+      if (best[i] === Infinity) continue;
+      var reach = nodes[i].along + (i === 0 ? startReach : range);
+      var legPrice = i === 0 ? v.price : price(nodes[i]);
+      for (var j = i + 1; j < n && nodes[j].along <= reach + 1e-6; j++) {
+        var c = best[i] + L(nodes[j].along - nodes[i].along) * legPrice + (nodes[j].end ? 0 : STOP_PENALTY);
+        if (c < best[j] - 1e-9) { best[j] = c; prev[j] = i; }
       }
-      var p = price(cur), target = null, buy = undefined;
-      var cheaper = cands.filter(function (s) { return price(s) < p - 1e-9 && s.along < total; })[0];
-      if (cheaper) target = cheaper;
-      else if (total <= reach) target = null;
-      else if (cands.length) { target = bestOf(cands); buy = usable - fuel; }
-      else { warnings.push(gapWarning(cur, pos, reach, st, total, range)); buy = usable - fuel; record(cur, buy, p, fuel); break; }
-      var nextAt = target ? target.along : total;
-      if (buy === undefined) buy = Math.max(0, L(nextAt - pos) - fuel);
-      record(cur, buy, p, fuel);
-      fuel += buy - L(nextAt - pos); pos = nextAt;
-      if (!target) break;
-      cur = target;
     }
-
-    function record(s, buy, p, fuelBefore) {
-      if (buy < 0.5) return;
-      buy = Math.min(buy, v.tank - (fuelBefore + v.reserveL));
-      steps.push({ s: s, buy: buy, price: p, cost: buy * p, arriveL: fuelBefore + v.reserveL, full: fuelBefore + buy >= usable - 0.5 });
-      bought += buy; cost += buy * p;
+    var warnings = [], last = n - 1;
+    if (best[n - 1] === Infinity) {
+      // Can't make it: plan as far as possible, then warn about the gap
+      last = 0;
+      for (var q = 0; q < n - 1; q++) if (best[q] < Infinity && nodes[q].along >= nodes[last].along) last = q;
+      var lr = nodes[last].along + (last === 0 ? startReach : range);
+      warnings.push(gapWarning(last === 0 ? null : nodes[last], nodes[last].along, lr, st, total, lr - nodes[last].along));
+    }
+    var path = [];
+    for (var x = last; x !== -1; x = prev[x]) path.unshift(x);
+    var steps = [], fuel = v.startL, bought = 0, cost = 0;
+    for (var y = 1; y < path.length; y++) {
+      var from = nodes[path[y - 1]], to = nodes[path[y]];
+      fuel -= L(to.along - from.along);
+      if (to.end) break;
+      var buy = v.tank - fuel, pr = price(to);
+      steps.push({ s: to, buy: buy, price: pr, cost: buy * pr, arriveL: fuel });
+      bought += buy; cost += buy * pr; fuel = v.tank;
     }
 
     // Longest stretch with no usable servo (including from the start and to the finish)
     var marks = [0].concat(st.map(function (s) { return s.along; }), [total]), gap = 0, gapAt = 0;
-    for (var i = 1; i < marks.length; i++) if (marks[i] - marks[i - 1] > gap) { gap = marks[i] - marks[i - 1]; gapAt = marks[i - 1]; }
+    for (var g = 1; g < marks.length; g++) if (marks[g] - marks[g - 1] > gap) { gap = marks[g] - marks[g - 1]; gapAt = marks[g - 1]; }
 
     return {
       steps: steps, warnings: warnings, bought: bought, cost: cost, range: range, total: total,
-      endL: warnings.length ? null : fuel + v.reserveL, longestGap: gap, gapAt: gapAt, usable: st.length, v: v
+      endL: warnings.length ? null : fuel, longestGap: gap, gapAt: gapAt, usable: st.length, v: v
     };
+  }
+
+  // ---------- Servo addresses: from the map data, or looked up for planned stops ----------
+  var addrCache = {}, addrQueue = [], addrBusy = false;
+  function tagAddress(t) {
+    var street = [t["addr:housenumber"], t["addr:street"]].filter(Boolean).join(" ");
+    var town = t["addr:suburb"] || t["addr:city"] || t["addr:town"] || "";
+    var st = [abbr(t["addr:state"]), t["addr:postcode"]].filter(Boolean).join(" ");
+    return { text: [street, town, st].filter(Boolean).join(", "), hasStreet: !!t["addr:street"] };
+  }
+  function servoAddress(s) {
+    if (addrCache[s.id] !== undefined) return addrCache[s.id];
+    var a = tagAddress(s.tags);
+    if (a.hasStreet) { addrCache[s.id] = a.text; return a.text; }
+    if (!addrQueue.some(function (q) { return q.id === s.id; })) { addrQueue.push(s); pumpAddresses(); }
+    return null; // still looking
+  }
+  async function pumpAddresses() {
+    if (addrBusy) return;
+    addrBusy = true;
+    while (addrQueue.length) {
+      var s = addrQueue.shift();
+      try {
+        var res = await fetch(GEOCODE_URL.replace("/search", "/reverse") + "?format=jsonv2&zoom=18&addressdetails=1&lat=" + s.lat + "&lon=" + s.lon,
+          { headers: { "Accept-Language": "en-AU" } });
+        var a = (await res.json()).address || {};
+        var street = [a.house_number, a.road].filter(Boolean).join(" ");
+        var town = a.suburb || a.town || a.city || a.village || a.hamlet || "";
+        addrCache[s.id] = [street, town, [abbr(a.state), a.postcode].filter(Boolean).join(" ")].filter(Boolean).join(", ") || tagAddress(s.tags).text;
+      } catch (e) { addrCache[s.id] = tagAddress(s.tags).text; }
+      renderPlan();
+      await sleep(1100); // the free address service allows about one lookup a second
+    }
+    addrBusy = false;
   }
 
   function gapWarning(cur, pos, reach, st, total, range) {
@@ -626,8 +751,9 @@
       html += '<div class="pstep"><div class="num">' + (i + 1) + "</div><div>" +
         '<div class="t" data-servo="' + s.id + '">' + esc(s.name) + (s.h24 ? '<span class="badge">24/7</span>' : "") +
         (s.sell === "unknown" ? '<span class="badge warnb">check ' + FUEL_NAME[v.type] + "</span>" : "") + "</div>" +
-        '<div class="m">' + (s.town ? esc(s.town) + " · " : "") + km(s.along) + " in · arrive with ~" + Math.round(st.arriveL) + " L</div></div>" +
-        '<div class="c">' + (st.full ? "Fill up" : "Top up") + "<small>~" + Math.round(st.buy) + " L · " + aud.format(st.cost) + "</small>" +
+        '<div class="addr">' + (function () { var a = servoAddress(s); return a === null ? "Finding address…" : esc(a || "Address not listed"); })() + "</div>" +
+        '<div class="m">' + km(s.along) + " in · arrive with ~" + Math.round(st.arriveL) + " L</div></div>" +
+        '<div class="c">' + aud.format(st.cost) + "<small>~" + Math.round(st.buy) + " L to fill</small>" +
         "<small>" + (own ? "$" + st.price.toFixed(2) + "/L (yours)" : "est. $" + st.price.toFixed(2) + "/L") + "</small></div></div>";
     });
     if (r.endL != null) {
@@ -663,7 +789,7 @@
       if (planIds[s.id]) {
         m = L.marker([s.lat, s.lon], { icon: L.divIcon({ className: "", html: '<div class="fpin">⛽ ' + planIds[s.id] + "</div>", iconSize: null, iconAnchor: [18, 12] }), zIndexOffset: 500 });
       } else if (s.ok) {
-        m = L.circleMarker([s.lat, s.lon], { radius: 5, color: "#fff", weight: 1.5, fillColor: "#1a56c4", fillOpacity: .95 });
+        m = L.circleMarker([s.lat, s.lon], { radius: 5, color: "#fff", weight: 1.5, fillColor: "#4c8df6", fillOpacity: 1 }).setStyle({ color: "#1a56c4", weight: 2 });
       } else {
         m = L.circleMarker([s.lat, s.lon], { radius: 4, color: "#fff", weight: 1, fillColor: "#8c8580", fillOpacity: .9 });
       }
@@ -840,9 +966,11 @@
     busy = true; $("go").disabled = true;
     try {
       setStatus("Finding places…");
-      S.from = (fromQ === "My location" && S.geoFrom) ? S.geoFrom : await geocode(fromQ);
-      if (!(fromQ === "My location" && S.geoFrom)) await sleep(1100); // be polite to the free place-search service
-      S.to = await geocode(toQ);
+      var fromPicked = (fromQ === "My location" && S.geoFrom) ? S.geoFrom : (picks.from && picks.from.text === fromQ ? picks.from : null);
+      var toPicked = picks.to && picks.to.text === toQ ? picks.to : null;
+      S.from = fromPicked || await geocode(fromQ);
+      if (!fromPicked && !toPicked) await sleep(1100); // be polite to the free fallback search
+      S.to = toPicked || await geocode(toQ);
       setStatus("Working out the route…");
       S.base = await getRoute([S.from, S.to]);
       S.current = S.base;
@@ -964,6 +1092,8 @@
     }, function () { setStatus("Couldn't get your location. Type a town instead.", true); }, { timeout: 10000 });
   });
   $("from").addEventListener("input", function () { if ($("from").value !== "My location") S.geoFrom = null; });
+  setupSuggest("from");
+  setupSuggest("to");
 
   $("copy").addEventListener("click", function () {
     if (!S.current) return;
@@ -972,6 +1102,10 @@
     var cost = $("cost").textContent;
     if (cost !== "–") txt += "\n⛽ Fuel: " + cost + ($("litres").textContent.indexOf("each") > -1 ? " (" + $("litres").textContent + ")" : "");
     if (stops.length) txt += "\n📍 Stops: " + stops.map(function (p) { return p.name; }).join(", ");
+    var fp = S.servosLoaded ? planFuel() : null;
+    if (fp && fp.steps.length) txt += "\n⛽ Fuel stops:\n" + fp.steps.map(function (st, i) {
+      return (i + 1) + ". " + st.s.name + (addrCache[st.s.id] ? ", " + addrCache[st.s.id] : "") + " (" + km(st.s.along) + " in)";
+    }).join("\n");
     txt += "\nGoogle Maps: " + $("gmaps").href;
     var done = function (m) { $("copyStatus").textContent = m; setTimeout(function () { $("copyStatus").textContent = ""; }, 2500); };
     try { navigator.clipboard.writeText(txt).then(function () { done("Copied, paste it in the group chat."); }, function () { done("Couldn't copy."); }); }
