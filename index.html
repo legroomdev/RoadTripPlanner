@@ -2,1217 +2,332 @@
 <html lang="en-AU">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Road Trip Planner Australia – Route, Stops & Fuel Cost</title>
-<meta name="description" content="Plan your Australian road trip: pick a start and destination, see the route, drive time and fuel cost, and find popular stops along the way that don't take you far off course.">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#18312D">
+<title>Aussie Road Trip Planner – Route, Fuel Stops & Pitstops</title>
+<meta name="description" content="Plan your Australian road trip: route, drive time, fuel stops planned around your vehicle's range, and pitstops along the way.">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<style>
-  :root {
-    --sand: #f6efe4; --card: #fffaf3; --ink: #2a2420; --muted: #7a6d62;
-    --line: #e6d9c7; --ochre: #c2522d; --ochre-dark: #9e3f20; --gum: #4f6b52;
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; }
-  body { background: var(--sand); color: var(--ink); font: 16px/1.5 Inter, system-ui, sans-serif; -webkit-text-size-adjust: 100%; }
-
-  .app { display: flex; flex-direction: column; min-height: 100%; }
-  #map { height: 44vh; min-height: 260px; position: sticky; top: 0; z-index: 3; border-bottom: 1px solid var(--line); }
-  .panel { padding: 16px 16px 40px; position: relative; z-index: 1; background: var(--sand); }
-  @media (min-width: 900px) {
-    .app { display: grid; grid-template-columns: 420px 1fr; height: 100vh; }
-    .panel { order: 1; overflow-y: auto; height: 100vh; border-right: 1px solid var(--line); }
-    #map { order: 2; height: 100vh; position: relative; border: 0; }
-  }
-
-  .kicker { font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ochre); }
-  h1 { font-family: "Bricolage Grotesque", Inter, sans-serif; font-weight: 800; font-size: 30px; line-height: 1.05; margin: 4px 0 6px; letter-spacing: -.02em; }
-  .lede { color: var(--muted); margin: 0 0 16px; font-size: 15px; }
-  h2 { font-family: "Bricolage Grotesque", Inter, sans-serif; font-size: 19px; font-weight: 600; margin: 0 0 10px; }
-
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; margin-bottom: 14px; }
-  label { display: block; font-size: 14px; font-weight: 500; margin-bottom: 6px; }
-  .field { margin-bottom: 12px; }
-  .with-btn { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
-  input, select {
-    width: 100%; font: inherit; font-size: 17px; color: var(--ink); background: #fff;
-    border: 1.5px solid var(--line); border-radius: 12px; padding: 11px 12px; -webkit-appearance: none; appearance: none;
-  }
-  input:focus, select:focus { outline: none; border-color: var(--ochre); }
-  .icon-btn { font: inherit; border: 1.5px solid var(--line); background: #fff; border-radius: 12px; padding: 0 14px; cursor: pointer; font-size: 14px; font-weight: 600; color: var(--ink); white-space: nowrap; }
-  .btn { width: 100%; font: inherit; font-weight: 600; font-size: 16px; border: 0; cursor: pointer; background: var(--ochre); color: #fff; padding: 13px 16px; border-radius: 12px; }
-  .btn:active { background: var(--ochre-dark); }
-  .btn:disabled { opacity: .6; cursor: wait; }
-  .btn.secondary { background: var(--ink); }
-  .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
-  .btn-row .btn { font-size: 14px; padding: 11px 10px; }
-  a.btn { display: block; text-align: center; text-decoration: none; }
-
-  .status { font-size: 14px; color: var(--muted); margin: 10px 0 0; min-height: 1em; }
-  .status.error { color: var(--ochre-dark); font-weight: 500; }
-
-  .summary { background: var(--ink); color: #fbf3e8; border: 0; }
-  .summary .route-name { font-size: 14px; color: #cbbba8; margin-bottom: 8px; }
-  .figs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .fig small { display: block; font-size: 12px; color: #cbbba8; text-transform: uppercase; letter-spacing: .06em; }
-  .fig b { font-family: "Bricolage Grotesque", Inter, sans-serif; font-size: 28px; font-weight: 800; line-height: 1.1; }
-  .fig span { font-size: 13px; color: #f0c9a8; }
-  .note { font-size: 13px; color: #cbbba8; margin-top: 12px; padding-top: 12px; border-top: 1px solid #4a403a; }
-
-  details.fuel summary { cursor: pointer; font-weight: 600; list-style: none; display: flex; justify-content: space-between; }
-  details.fuel summary::-webkit-details-marker { display: none; }
-  details.fuel summary::after { content: "＋"; color: var(--muted); }
-  details.fuel[open] summary::after { content: "－"; }
-  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
-
-  .stops-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
-  .stops-head h2 { margin: 0; }
-  .stops-head select { width: auto; font-size: 14px; padding: 8px 30px 8px 10px; }
-  .chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 8px; scrollbar-width: none; }
-  .chip { flex: none; font: inherit; font-size: 13px; font-weight: 600; border: 1.5px solid var(--line); background: #fff; color: var(--ink); border-radius: 99px; padding: 6px 12px; cursor: pointer; }
-  .chip[aria-pressed=true] { background: var(--ink); color: #fff; border-color: var(--ink); }
-
-  .stop { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
-  .stop:first-child { border-top: 0; }
-  .stop .emo { font-size: 22px; text-align: center; }
-  .stop .name { font-weight: 600; font-size: 15px; line-height: 1.25; cursor: pointer; }
-  .stop .meta { font-size: 13px; color: var(--muted); }
-  .badge { display: inline-block; font-size: 11px; font-weight: 600; color: var(--gum); background: #e4ece2; border-radius: 6px; padding: 1px 6px; margin-left: 4px; vertical-align: 1px; }
-  .add { font: inherit; font-size: 13px; font-weight: 600; border: 1.5px solid var(--ochre); color: var(--ochre); background: #fff; border-radius: 10px; padding: 7px 10px; cursor: pointer; white-space: nowrap; }
-  .add.on { background: var(--ochre); color: #fff; }
-  .empty { color: var(--muted); font-size: 14px; padding: 6px 0; }
-  .hidden { display: none !important; }
-
-  .ac { position: relative; }
-  .ac-list { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 50; margin: 0; padding: 4px 0; list-style: none;
-    background: #fff; border: 1.5px solid var(--line); border-radius: 12px; box-shadow: 0 10px 24px rgba(42,36,32,.15); max-height: 300px; overflow-y: auto; }
-  .ac-list li { padding: 9px 12px; cursor: pointer; line-height: 1.3; }
-  .ac-list li + li { border-top: 1px solid #f1e8dc; }
-  .ac-list li:active, .ac-list li.hl { background: #f6efe4; }
-  .ac-list b { display: block; font-size: 15px; font-weight: 600; }
-  .ac-list small { color: var(--muted); font-size: 13px; }
-  .addr { font-size: 13px; color: var(--ink); }
-  .hint { font-size: 13px; color: var(--muted); margin: 10px 0 0; }
-  .plan-sum { font-size: 14px; background: #f3e9db; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
-  .plan-sum b { font-size: 16px; }
-  .pstep { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: start; padding: 10px 0; border-top: 1px solid var(--line); }
-  .pstep:first-child { border-top: 0; }
-  .pstep .num { width: 28px; height: 28px; border-radius: 50%; background: var(--ink); color: #fff; display: grid; place-items: center; font-size: 13px; font-weight: 600; }
-  .pstep .num.end { background: var(--gum); }
-  .pstep .t { font-weight: 600; font-size: 15px; line-height: 1.25; }
-  .pstep .m { font-size: 13px; color: var(--muted); }
-  .pstep .c { text-align: right; font-weight: 600; font-size: 15px; }
-  .pstep .c small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
-  .warn { background: #fbe3d9; color: var(--ochre-dark); border-radius: 10px; padding: 10px 12px; font-size: 14px; margin: 8px 0; }
-  details.servos { margin-top: 10px; }
-  details.servos summary { cursor: pointer; font-weight: 600; font-size: 15px; padding: 6px 0; }
-  .srow { display: grid; grid-template-columns: 1fr 92px; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
-  .srow input { font-size: 15px; padding: 8px 10px; }
-  .badge.warnb { color: var(--ochre-dark); background: #fbe3d9; }
-  .fpin { background: var(--ink); color: #fff; border: 2px solid #fff; border-radius: 14px; font: 600 12px/1 Inter, sans-serif; padding: 5px 7px; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,.3); }
-  .leaflet-popup-content { font: 14px/1.4 Inter, sans-serif; margin: 12px 14px; }
-  .leaflet-popup-content b { font-size: 15px; }
-  .leaflet-popup-content .add { margin-top: 8px; }
-  footer { font-size: 12px; color: var(--muted); margin-top: 20px; }
-  footer a { color: var(--muted); }
-</style>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
 </head>
 <body>
-<div class="app">
-  <div id="map" role="region" aria-label="Map"></div>
 
-  <main class="panel">
-    <div class="kicker">Aussie road trip planner</div>
-    <h1>Plan the drive</h1>
-    <p class="lede">Route, drive time, smart fuel stops for your vehicle, and the best stops along the way.</p>
+<!-- Map: always full-screen behind everything; the home screen covers it until a trip is planned -->
+<div id="map" role="region" aria-label="Trip map"></div>
 
-    <form class="card" id="tripForm" autocomplete="off">
-      <div class="field">
-        <label for="from">Starting from</label>
-        <div class="with-btn">
-          <div class="ac">
-            <input id="from" type="text" placeholder="Address, place or town" enterkeyhint="next" role="combobox" aria-autocomplete="list" aria-controls="fromList">
-            <ul class="ac-list" id="fromList" role="listbox" hidden></ul>
+<!-- ================= RESULTS SCREEN (map + bottom sheet) ================= -->
+<header class="topbar" id="topbar" hidden>
+  <button type="button" class="tb-btn" id="backBtn" aria-label="Back to trip planning">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+  </button>
+  <h1 class="tb-title" id="tbTitle">Your trip</h1>
+  <button type="button" class="tb-btn" id="menuBtn" aria-label="Trip options" aria-haspopup="menu" aria-expanded="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
+  </button>
+  <div class="menu" id="tripMenu" role="menu" hidden>
+    <button type="button" role="menuitem" id="copy">Copy trip summary</button>
+    <button type="button" role="menuitem" data-open-vehicle>Edit vehicle</button>
+    <button type="button" role="menuitem" id="menuEdit">Change start or destination</button>
+  </div>
+</header>
+
+<div class="map-tools" id="mapTools" hidden>
+  <button type="button" class="map-btn" data-dev="Map styles" aria-label="Map styles (in development)">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg>
+  </button>
+  <button type="button" class="map-btn" id="locateMap" aria-label="Show my location">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 3L3 10.5l7.5 2.9L13.5 21z"/></svg>
+  </button>
+</div>
+
+<section class="sheet" id="sheet" aria-label="Trip results" hidden>
+  <div class="sheet-grab" id="sheetGrab">
+    <div class="handle" role="button" tabindex="0" id="sheetHandle" aria-label="Resize results panel"></div>
+    <div id="summary">
+      <h2 class="sum-title" id="sumTitle">–</h2>
+      <div class="stats">
+        <span class="stat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17h16M4 7h16M8 3l-4 4 4 4M16 13l4 4-4 4"/></svg><b id="dist">–</b></span>
+        <span class="stat"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg><b id="time">–</b></span>
+        <span class="stat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 21V5a2 2 0 012-2h6a2 2 0 012 2v16M4 21h12M15 9h2a2 2 0 012 2v5a1.5 1.5 0 003 0V8l-3-3"/><path d="M8 7h4"/></svg><b id="litres">–</b></span>
+        <span class="stat"><span class="pill dev" id="cost">Cost: in development</span></span>
+      </div>
+      <p class="sum-extra" id="sumExtra"></p>
+    </div>
+  </div>
+
+  <div class="tabs" role="tablist" aria-label="Trip sections">
+    <button type="button" role="tab" class="tab" id="tabbtn-fuel" aria-controls="tab-fuel" aria-selected="true">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 21V5a2 2 0 012-2h6a2 2 0 012 2v16M4 21h12M15 9h2a2 2 0 012 2v5a1.5 1.5 0 003 0V8l-3-3"/><path d="M8 7h4"/></svg>Fuel Plan</button>
+    <button type="button" role="tab" class="tab" id="tabbtn-pitstops" aria-controls="tab-pitstops" aria-selected="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><circle cx="12" cy="13.5" r="3.5"/><path d="M8 7l1.5-3h5L16 7"/></svg>Pitstops</button>
+    <button type="button" role="tab" class="tab" id="tabbtn-route" aria-controls="tab-route" aria-selected="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><path d="M7 18h6a3 3 0 000-6h-2a3 3 0 010-6h6"/></svg>Route</button>
+    <button type="button" role="tab" class="tab" id="tabbtn-details" aria-controls="tab-details" aria-selected="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg>Details</button>
+  </div>
+
+  <div class="sheet-body" id="sheetBody">
+    <!-- FUEL PLAN -->
+    <div class="tabpanel" id="tab-fuel" role="tabpanel" aria-labelledby="tabbtn-fuel">
+      <div class="info-card">
+        <svg class="leaf" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19c0-8 5-14 15-14 0 10-6 15-14 15M5 19l7-7"/></svg>
+        <div>
+          <b>Recommended fuel plan</b>
+          <span>Fewest fill-ups that keep you above your reserve</span>
+        </div>
+        <button type="button" class="icon-round" id="planInfoBtn" aria-label="How the fuel plan works" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg>
+        </button>
+      </div>
+      <p class="explain" id="planInfo" hidden>Every stop is a fill to full. The plan picks servos within about 1.5 km of your route that sell your fuel, so you never drop below the reserve you set. Servo data comes from OpenStreetMap, which doesn't always record every fuel type, so check stops marked "not confirmed".</p>
+      <section id="planCard">
+        <div id="planBody"><p class="empty">Plan a trip to see your fuel stops.</p></div>
+        <details class="servos" id="servoBox">
+          <summary>All servos on the route <span id="servoCount"></span></summary>
+          <div id="servoList"></div>
+        </details>
+      </section>
+    </div>
+
+    <!-- PITSTOPS -->
+    <div class="tabpanel" id="tab-pitstops" role="tabpanel" aria-labelledby="tabbtn-pitstops" hidden>
+      <section id="stopsCard">
+        <div class="stops-head">
+          <div>
+            <h3>Add pitstops</h3>
+            <p class="sub">Sights, lookouts and towns along your route.</p>
           </div>
-          <button type="button" class="icon-btn" id="locate" title="Use my location">📍 Me</button>
+          <select id="radius" aria-label="How far off the route">
+            <option value="2">Within 2 km</option>
+            <option value="5" selected>Within 5 km</option>
+            <option value="10">Within 10 km</option>
+            <option value="20">Within 20 km</option>
+          </select>
         </div>
+        <div class="chips" id="chips"></div>
+        <div id="stopList"><p class="empty">Plan a trip to see pitstops.</p></div>
+      </section>
+    </div>
+
+    <!-- ROUTE -->
+    <div class="tabpanel" id="tab-route" role="tabpanel" aria-labelledby="tabbtn-route" hidden>
+      <h3>Your route</h3>
+      <div id="routeList"></div>
+    </div>
+
+    <!-- DETAILS -->
+    <div class="tabpanel" id="tab-details" role="tabpanel" aria-labelledby="tabbtn-details" hidden>
+      <div class="detail-group">
+        <h3>Vehicle</h3>
+        <p id="vehSummary2" class="detail-line"></p>
+        <p class="detail-line muted" id="rangeHint2"></p>
+        <button type="button" class="btn ghost small" data-open-vehicle>Edit vehicle</button>
       </div>
-      <div class="field">
-        <label for="to">Going to</label>
-        <div class="ac">
-          <input id="to" type="text" placeholder="Address, place or town" enterkeyhint="go" role="combobox" aria-autocomplete="list" aria-controls="toList">
-          <ul class="ac-list" id="toList" role="listbox" hidden></ul>
+      <div class="detail-group">
+        <h3>Trip</h3>
+        <dl class="dl">
+          <dt>Distance</dt><dd id="dDist">–</dd>
+          <dt>Driving time</dt><dd id="dTime">–</dd>
+          <dt>Rest breaks</dt><dd><span id="breaks">–</span> (one every 2 hours)</dd>
+          <dt>Fuel use</dt><dd id="dFuel">–</dd>
+        </dl>
+        <p class="detail-line muted">Driving time doesn't include stops. Add time for breaks, food and sightseeing.</p>
+      </div>
+      <div class="detail-group">
+        <h3>Fuel prices <span class="pill dev">In development</span></h3>
+        <p class="detail-line muted">Live prices from the state fuel price schemes will show here, marked as live, out of date or unavailable, with their source and time.</p>
+      </div>
+      <div class="detail-group">
+        <h3>Data</h3>
+        <p class="detail-line data-status" id="dataStatus"></p>
+        <p class="detail-line muted">Estimates only. Always check road conditions and plan fuel carefully in remote areas.</p>
+        <p class="detail-line muted">Map data © <a href="https://www.openstreetmap.org/copyright" rel="noopener" target="_blank">OpenStreetMap</a> contributors. Routing by <a href="https://project-osrm.org/" rel="noopener" target="_blank">OSRM</a>.</p>
+      </div>
+      <p class="status" id="copyStatus"></p>
+    </div>
+  </div>
+</section>
+
+<div class="actionbar" id="actionBar" hidden>
+  <button type="button" class="btn ghost" id="recalcBtn">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 10-2.3 5.7M20 4v7h-7"/></svg>Recalculate</button>
+  <a class="btn" id="gmaps" href="#" target="_blank" rel="noopener">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 3L3 10.5l7.5 2.9L13.5 21z"/></svg>Navigate</a>
+</div>
+
+<!-- ================= HOME ================= -->
+<main class="screen" id="screen-home">
+  <header class="hero">
+    <svg class="hero-mark" viewBox="0 0 120 44" aria-hidden="true">
+      <path d="M4 40L34 10l14 14 16-20 52 36" fill="none" stroke="#F7F3EB" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+      <circle cx="94" cy="12" r="5" fill="#E8B65B"/>
+    </svg>
+    <h1 class="hero-title">Aussie Road <span>Trip Planner</span></h1>
+    <p class="hero-sub">Plan smarter. Fill up right. Explore more.</p>
+  </header>
+
+  <div class="home-body">
+    <form class="card plan-card" id="tripForm" autocomplete="off">
+      <h2 class="card-title">
+        <svg viewBox="0 0 24 24" aria-hidden="true" class="ico-terra"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0114 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>
+        Plan a trip</h2>
+      <div class="od">
+        <div class="od-fields">
+          <label for="from">Starting from</label>
+          <div class="with-btn">
+            <div class="ac">
+              <input id="from" type="text" placeholder="Address, place or town" enterkeyhint="next" role="combobox" aria-autocomplete="list" aria-controls="fromList" aria-expanded="false">
+              <ul class="ac-list" id="fromList" role="listbox" hidden></ul>
+            </div>
+            <button type="button" class="icon-btn" id="locate" aria-label="Use my location">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7"/></svg>
+            </button>
+          </div>
+          <label for="to">Going to</label>
+          <div class="ac">
+            <input id="to" type="text" placeholder="Address, place or town" enterkeyhint="go" role="combobox" aria-autocomplete="list" aria-controls="toList" aria-expanded="false">
+            <ul class="ac-list" id="toList" role="listbox" hidden></ul>
+          </div>
         </div>
+        <button type="button" class="swap" id="swapBtn" aria-label="Swap start and destination">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4v16M8 4L4 8M8 4l4 4M16 20V4M16 20l-4-4M16 20l4-4"/></svg>
+        </button>
       </div>
-      <button class="btn" id="go" type="submit">Plan my trip</button>
+      <button class="btn primary" id="go" type="submit">Plan my trip
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
       <p class="status" id="status" aria-live="polite"></p>
     </form>
 
-    <section class="card summary hidden" id="summary" aria-live="polite">
-      <div class="route-name" id="routeName"></div>
-      <div class="figs">
-        <div class="fig"><small>Distance</small><b id="dist">–</b><span id="distExtra"></span></div>
-        <div class="fig"><small>Drive time</small><b id="time">–</b><span id="timeExtra"></span></div>
-        <div class="fig"><small>Fuel cost</small><b id="cost">–</b><span id="litres"></span></div>
-        <div class="fig"><small>Rest breaks</small><b id="breaks">–</b><span>every 2 hrs</span></div>
+    <div class="card current-trip" id="currentTrip" hidden>
+      <div>
+        <small>Current trip</small>
+        <b id="ctTitle"></b>
+        <span id="ctMeta"></span>
       </div>
-      <div class="note">Drive time is without stops. Add time for breaks, food and sightseeing.</div>
-      <div class="btn-row">
-        <a class="btn" id="gmaps" href="#" target="_blank" rel="noopener">Open in Google Maps</a>
-        <button type="button" class="btn secondary" id="copy">Copy trip</button>
-      </div>
-      <p class="status" id="copyStatus" style="color:#cbbba8"></p>
-    </section>
+      <button type="button" class="btn small" id="ctView">View</button>
+    </div>
 
-    <section class="card hidden" id="planCard">
-      <h2>⛽ Fuel plan</h2>
-      <div id="planBody"><p class="empty">Finding servos along your route…</p></div>
-      <details class="servos" id="servoBox">
-        <summary>All servos on the route <span id="servoCount"></span></summary>
-        <p class="hint">Know the price at a servo? Enter it and the plan re-works itself to favour the cheap ones.</p>
-        <div id="servoList"></div>
-      </details>
-    </section>
+    <div class="card vehicle-card">
+      <div>
+        <small>Your vehicle</small>
+        <b id="vehSummary">–</b>
+        <span id="rangeHint"></span>
+      </div>
+      <button type="button" class="btn ghost small" data-open-vehicle>Edit</button>
+    </div>
 
-    <details class="card fuel" id="fuelBox" open>
-      <summary>Your vehicle</summary>
-      <div class="row">
-        <div>
-          <label for="fuelType">Fuel type</label>
-          <select id="fuelType">
-            <option value="ulp">Unleaded 91</option><option value="e10">E10</option>
-            <option value="p95">Premium 95</option><option value="p98">Premium 98</option>
-            <option value="diesel">Diesel</option><option value="lpg">LPG</option>
-          </select>
-        </div>
-        <div>
-          <label for="tank">Tank size (L)</label>
-          <input id="tank" type="number" inputmode="decimal" step="1" min="10" value="60">
-        </div>
-      </div>
-      <div class="row">
-        <div>
-          <label for="economy">Fuel use (L/100km)</label>
-          <input id="economy" type="number" inputmode="decimal" step="0.1" min="0" value="8">
-        </div>
-        <div>
-          <label for="tow">Towing</label>
-          <select id="tow">
-            <option value="0">Not towing</option><option value="0.15">Light trailer (+15%)</option>
-            <option value="0.35">Caravan (+35%)</option><option value="0.5">Heavy van (+50%)</option>
-          </select>
-        </div>
-      </div>
-      <div class="row">
-        <div>
-          <label for="startFuel">Leaving with</label>
-          <select id="startFuel">
-            <option value="1">Full tank</option><option value="0.75">3/4 tank</option>
-            <option value="0.5">1/2 tank</option><option value="0.25">1/4 tank</option>
-          </select>
-        </div>
-        <div>
-          <label for="reserve">Never go below</label>
-          <select id="reserve"><option value="0.1">10% of tank</option><option value="0.2" selected>20% of tank</option><option value="0.3">30% of tank</option></select>
-        </div>
-      </div>
-      <div class="row">
-        <div>
-          <label for="price">Usual price ($/L)</label>
-          <input id="price" type="number" inputmode="decimal" step="0.01" min="0" value="2.00">
-        </div>
-        <div>
-          <label for="people">Splitting between</label>
-          <select id="people">
-            <option value="1">Just me</option><option value="2">2 people</option><option value="3">3 people</option>
-            <option value="4">4 people</option><option value="5">5 people</option><option value="6">6 people</option>
-          </select>
-        </div>
-      </div>
-      <p class="hint" id="rangeHint"></p>
-    </details>
+    <div class="quick">
+      <button type="button" class="quick-btn" data-open-vehicle>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 17h14M6 17v2M18 17v2M4 13l2-6h12l2 6v4H4z"/><circle cx="8" cy="14" r="1"/><circle cx="16" cy="14" r="1"/></svg>My vehicles</button>
+      <button type="button" class="quick-btn" data-nav="trips">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg>Saved trips</button>
+      <button type="button" class="quick-btn" data-dev="Trip settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>Trip settings</button>
+    </div>
+  </div>
+</main>
 
-    <section class="card hidden" id="stopsCard">
-      <div class="stops-head">
-        <h2>Stops along the way</h2>
-        <select id="radius" aria-label="How far off the route">
-          <option value="2">Within 2 km</option>
-          <option value="5" selected>Within 5 km</option>
-          <option value="10">Within 10 km</option>
-          <option value="20">Within 20 km</option>
+<!-- ================= PLACEHOLDER SCREENS ================= -->
+<main class="screen dev-screen" id="screen-trips" hidden>
+  <h1>Trips</h1>
+  <div class="card current-trip" id="currentTrip2" hidden>
+    <div><small>Current trip</small><b id="ctTitle2"></b><span id="ctMeta2"></span></div>
+    <button type="button" class="btn small" id="ctView2">View</button>
+  </div>
+  <div class="dev-card"><span class="pill dev">In development</span><h2>Saved trips</h2><p>Save trips and open them later, even with no signal.</p></div>
+</main>
+<main class="screen dev-screen" id="screen-fuel" hidden>
+  <h1>Fuel</h1>
+  <div class="dev-card"><span class="pill dev">In development</span><h2>Servos near you and live prices</h2><p>Find nearby servos and compare live prices once the state price feeds are connected.</p></div>
+</main>
+<main class="screen dev-screen" id="screen-explore" hidden>
+  <h1>Explore</h1>
+  <div class="dev-card"><span class="pill dev">In development</span><h2>Road trip ideas</h2><p>Classic Aussie drives and places worth the detour.</p></div>
+</main>
+<main class="screen dev-screen" id="screen-more" hidden>
+  <h1>More</h1>
+  <div class="card more-card">
+    <h2>About the data</h2>
+    <p class="data-status"></p>
+    <p class="muted">Estimates only. Always check road conditions and plan fuel carefully in remote areas.</p>
+    <p class="muted">Map data © <a href="https://www.openstreetmap.org/copyright" rel="noopener" target="_blank">OpenStreetMap</a> contributors. Routing by <a href="https://project-osrm.org/" rel="noopener" target="_blank">OSRM</a>.</p>
+  </div>
+  <div class="dev-card"><span class="pill dev">In development</span><h2>Settings and account</h2><p>Units, default vehicle and app preferences.</p></div>
+</main>
+
+<nav class="bottomnav" id="bottomNav" aria-label="Main">
+  <button type="button" data-nav="home" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-7 9 7v9a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1z"/></svg>Home</button>
+  <button type="button" data-nav="trips"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><path d="M7 18h6a3 3 0 000-6h-2a3 3 0 010-6h6"/></svg>Trips</button>
+  <button type="button" data-nav="fuel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 21V5a2 2 0 012-2h6a2 2 0 012 2v16M4 21h12M15 9h2a2 2 0 012 2v5a1.5 1.5 0 003 0V8l-3-3"/><path d="M8 7h4"/></svg>Fuel</button>
+  <button type="button" data-nav="explore"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20l6-12 4 7 3-4 5 9z"/></svg>Explore</button>
+  <button type="button" data-nav="more"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>More</button>
+</nav>
+
+<!-- ================= VEHICLE SETTINGS (modal sheet) ================= -->
+<div class="modal" id="vehicleModal" role="dialog" aria-modal="true" aria-labelledby="vehTitle" hidden>
+  <div class="modal-card">
+    <div class="modal-head">
+      <h2 id="vehTitle">Your vehicle</h2>
+      <button type="button" class="tb-btn dark" id="vehClose" aria-label="Close">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <p class="dev-note"><span class="pill dev">In development</span> Saving more than one vehicle.</p>
+    <div class="row">
+      <div>
+        <label for="fuelType">Fuel type</label>
+        <select id="fuelType">
+          <option value="ulp">Unleaded 91</option><option value="e10">E10</option>
+          <option value="p95">Premium 95</option><option value="p98">Premium 98</option>
+          <option value="diesel">Diesel</option><option value="lpg">LPG</option>
         </select>
       </div>
-      <div class="chips" id="chips"></div>
-      <div id="stopList"></div>
-    </section>
-
-    <footer>
-      <span id="dataStatus"></span><br>
-      Estimates only. Always check road conditions and plan fuel carefully in remote areas.<br>
-      Map data © <a href="https://www.openstreetmap.org/copyright" rel="noopener">OpenStreetMap</a> contributors. Routing by <a href="https://project-osrm.org/" rel="noopener">OSRM</a>.
-    </footer>
-  </main>
+      <div>
+        <label for="tank">Tank size (L)</label>
+        <input id="tank" type="number" inputmode="decimal" step="1" min="10" value="60">
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label for="economy">Fuel use (L/100km)</label>
+        <input id="economy" type="number" inputmode="decimal" step="0.1" min="0" value="8">
+      </div>
+      <div>
+        <label for="tow">Towing</label>
+        <select id="tow">
+          <option value="0">Not towing</option><option value="0.15">Light trailer (+15%)</option>
+          <option value="0.35">Caravan (+35%)</option><option value="0.5">Heavy van (+50%)</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label for="startFuel">Leaving with</label>
+        <select id="startFuel">
+          <option value="1">Full tank</option><option value="0.75">3/4 tank</option>
+          <option value="0.5">1/2 tank</option><option value="0.25">1/4 tank</option>
+        </select>
+      </div>
+      <div>
+        <label for="reserve">Never go below</label>
+        <select id="reserve"><option value="0.1">10% of tank</option><option value="0.2" selected>20% of tank</option><option value="0.3">30% of tank</option></select>
+      </div>
+    </div>
+    <!-- Prices are in development: these keep the existing planner's inputs without showing them -->
+    <div hidden>
+      <input id="price" type="number" value="2.00">
+      <select id="people"><option value="1" selected>1</option></select>
+    </div>
+    <p class="hint" id="rangeHint3"></p>
+    <button type="button" class="btn primary" id="vehDone">Done</button>
+  </div>
 </div>
 
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script>
-(function () {
-  "use strict";
-
-  // ---------- Services (free OpenStreetMap-based; swap for keyed providers before heavy public use) ----------
-  var GEOCODE_URL = "https://nominatim.openstreetmap.org/search";
-  var ROUTE_URL = "https://router.project-osrm.org/route/v1/driving/";
-  var OVERPASS_URL = "https://overpass-api.de/api/interpreter";
-
-  var CATS = {
-    must:       { label: "Must-sees",     emo: "⭐" },
-    town:       { label: "Towns",         emo: "🏘️", color: "#4f6b52" },
-    lookout:    { label: "Lookouts",      emo: "🔭", color: "#2f6f8f" },
-    nature:     { label: "Nature",        emo: "🌿", color: "#3f8a4f" },
-    attraction: { label: "Attractions",   emo: "🎯", color: "#c2522d" },
-    museum:     { label: "Museums & art", emo: "🏛️", color: "#7a4f9a" },
-    history:    { label: "History",       emo: "📜", color: "#8a6a3a" },
-    family:     { label: "Zoos & parks",  emo: "🦘", color: "#d08a1e" }
-  };
-
-  var $ = function (id) { return document.getElementById(id); };
-  var S = {
-    from: null, to: null, geoFrom: null,
-    base: null,          // base route (no added stops): {coords, cum, distance, duration}
-    current: null,       // route actually shown (with added stops)
-    pois: [], selected: {}, filter: "all",
-    servos: [], servosLoaded: false, prices: {}
-  };
-
-  // ---------- Map ----------
-  var map = L.map("map", { zoomControl: true, preferCanvas: true }).setView([-28.5, 134], 4);
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-  }).addTo(map);
-  var routeLayer = L.layerGroup().addTo(map);
-  var poiLayer = L.layerGroup().addTo(map);
-  var allServoLayer = L.layerGroup();
-  var servoLayer = L.layerGroup().addTo(map);
-  var poiMarkers = {};
-
-  // ---------- Helpers ----------
-  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
-  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
-  function setStatus(msg, isErr) { var s = $("status"); s.textContent = msg || ""; s.className = "status" + (isErr ? " error" : ""); }
-  function km(n) { return Math.round(n).toLocaleString("en-AU") + " km"; }
-  function dur(sec) {
-    var h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
-    if (m === 60) { h++; m = 0; }
-    return h ? h + "h " + (m < 10 ? "0" : "") + m + "m" : m + " min";
-  }
-  var aud = new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 });
-
-  function hav(a, b) {
-    var R = 6371, r = Math.PI / 180;
-    var dLat = (b[0] - a[0]) * r, dLon = (b[1] - a[1]) * r;
-    var s = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
-  }
-  function cumulative(coords) {
-    var c = [0];
-    for (var i = 1; i < coords.length; i++) c.push(c[i - 1] + hav(coords[i - 1], coords[i]));
-    return c;
-  }
-  // Thin a line so consecutive points are at least `stepKm` apart (always keeps both ends).
-  function thin(coords, cum, stepKm) {
-    var outC = [coords[0]], outCum = [0], next = stepKm;
-    for (var i = 1; i < coords.length - 1; i++) {
-      if (cum[i] >= next) { outC.push(coords[i]); outCum.push(cum[i]); next = cum[i] + stepKm; }
-    }
-    outC.push(coords[coords.length - 1]); outCum.push(cum[cum.length - 1]);
-    return { coords: outC, cum: outCum };
-  }
-  // Distance (km) from point p to the polyline, and how far along the line the nearest point is.
-  function locate(p, coords, cum) {
-    var r = Math.PI / 180, kx = 111.32 * Math.cos(p[0] * r), ky = 110.57;
-    var best = { off: Infinity, along: 0 };
-    for (var i = 1; i < coords.length; i++) {
-      var a = coords[i - 1], b = coords[i];
-      var ax = (a[1] - p[1]) * kx, ay = (a[0] - p[0]) * ky;
-      var bx = (b[1] - p[1]) * kx, by = (b[0] - p[0]) * ky;
-      var dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy;
-      var t = L2 ? -(ax * dx + ay * dy) / L2 : 0;
-      t = t < 0 ? 0 : t > 1 ? 1 : t;
-      var x = ax + t * dx, y = ay + t * dy, d = Math.sqrt(x * x + y * y);
-      if (d < best.off) best = { off: d, along: cum[i - 1] + t * (cum[i] - cum[i - 1]) };
-    }
-    return best;
-  }
-
-  // ---------- Services ----------
-  var STATE_ABBR = { "South Australia": "SA", "Victoria": "VIC", "New South Wales": "NSW", "Queensland": "QLD", "Western Australia": "WA",
-    "Tasmania": "TAS", "Northern Territory": "NT", "Australian Capital Territory": "ACT" };
-  function abbr(st) { return STATE_ABBR[st] || st || ""; }
-
-  // Fallback when nothing was picked from the suggestions
-  async function geocode(q) {
-    var url = GEOCODE_URL + "?format=jsonv2&limit=1&addressdetails=1&countrycodes=au&q=" + encodeURIComponent(q);
-    var res = await fetch(url, { headers: { "Accept-Language": "en-AU" } });
-    if (!res.ok) throw new Error("Place search is busy. Give it a few seconds and try again.");
-    var j = await res.json();
-    if (!j.length) throw new Error("Couldn't find \"" + q + "\" in Australia. Pick an option from the list as you type, or add the suburb and state.");
-    var a = j[0].address || {};
-    var street = [a.house_number, a.road].filter(Boolean).join(" ");
-    var town = a.suburb || a.town || a.city || a.village || a.hamlet || "";
-    var name = (j[0].name && j[0].name !== a.road ? j[0].name : street) || town || String(j[0].display_name).split(",")[0];
-    if (town && name !== town) name += ", " + town;
-    return { lat: +j[0].lat, lon: +j[0].lon, name: name };
-  }
-
-  // Suggestions as you type: addresses, streets, businesses and towns (Photon, built on OpenStreetMap)
-  var PHOTON_URL = "https://photon.komoot.io/api/";
-  function photonLabel(pr) {
-    var street = [pr.housenumber, pr.street].filter(Boolean).join(" ");
-    var title = pr.name && pr.name !== pr.street ? pr.name : (street || pr.name || "");
-    var town = pr.city || pr.town || pr.village || pr.district || pr.locality || pr.county || "";
-    var sub = [];
-    if (pr.name && pr.name !== pr.street && street) sub.push(street);
-    if (town && town !== title) sub.push(town);
-    var st = [abbr(pr.state), pr.postcode].filter(Boolean).join(" ");
-    if (st) sub.push(st);
-    return { title: title, sub: sub.join(", "), short: title + (town && town !== title ? ", " + town : "") };
-  }
-
-  var picks = { from: null, to: null };
-  function setupSuggest(key) {
-    var input = $(key), list = $(key + "List"), timer = null, ctrl = null, feats = [], hl = -1;
-    function hide() { list.hidden = true; hl = -1; }
-    function choose(i) {
-      var f = feats[i]; if (!f) return;
-      var lab = photonLabel(f.properties);
-      picks[key] = { lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0], name: lab.short, text: lab.short };
-      input.value = lab.short;
-      if (key === "from") S.geoFrom = null;
-      hide(); save();
-    }
-    async function search(q) {
-      try {
-        if (ctrl) ctrl.abort();
-        ctrl = new AbortController();
-        var c = map.getCenter();
-        var url = PHOTON_URL + "?limit=7&lang=en&bbox=112.9,-43.7,153.7,-10.6&lat=" + c.lat.toFixed(3) + "&lon=" + c.lng.toFixed(3) +
-          "&q=" + encodeURIComponent(q);
-        var res = await fetch(url, { signal: ctrl.signal });
-        var j = await res.json();
-        feats = (j.features || []).filter(function (f) { return f.properties && f.properties.countrycode === "AU"; });
-        hl = -1;
-        list.innerHTML = feats.map(function (f, i) {
-          var lab = photonLabel(f.properties);
-          return '<li role="option" data-i="' + i + '"><b>' + esc(lab.title) + "</b><small>" + esc(lab.sub) + "</small></li>";
-        }).join("");
-        list.hidden = !feats.length || document.activeElement !== input;
-      } catch (e) { /* aborted or offline: keep typing works with the fallback search */ }
-    }
-    input.addEventListener("input", function () {
-      picks[key] = null;
-      clearTimeout(timer);
-      var q = input.value.trim();
-      if (q.length < 3 || q === "My location") { hide(); return; }
-      timer = setTimeout(function () { search(q); }, 300);
-    });
-    input.addEventListener("keydown", function (e) {
-      if (list.hidden) return;
-      var items = list.querySelectorAll("li");
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        e.preventDefault();
-        hl = (hl + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
-        items.forEach(function (li, i) { li.classList.toggle("hl", i === hl); });
-      } else if (e.key === "Enter" && hl >= 0) { e.preventDefault(); choose(hl); }
-      else if (e.key === "Escape") hide();
-    });
-    // pointerdown fires before the input loses focus, so the tap always lands
-    list.addEventListener("pointerdown", function (e) {
-      var li = e.target.closest("li"); if (!li) return;
-      e.preventDefault(); choose(+li.dataset.i);
-    });
-    input.addEventListener("blur", function () { setTimeout(hide, 150); });
-  }
-
-  async function getRoute(points) {
-    var path = points.map(function (p) { return p.lon.toFixed(5) + "," + p.lat.toFixed(5); }).join(";");
-    var res = await fetch(ROUTE_URL + path + "?overview=full&geometries=geojson&steps=false");
-    var j = await res.json().catch(function () { return {}; });
-    if (!res.ok || j.code !== "Ok" || !j.routes || !j.routes.length) {
-      throw new Error("Couldn't find a driving route between those places.");
-    }
-    var rt = j.routes[0];
-    var coords = rt.geometry.coordinates.map(function (c) { return [c[1], c[0]]; });
-    return { coords: coords, cum: cumulative(coords), distance: rt.distance / 1000, duration: rt.duration };
-  }
-
-  var OVERPASS_URLS = [OVERPASS_URL, "https://overpass.private.coffee/api/interpreter"];
-
-  async function overpass(q, busyMsg) {
-    for (var i = 0; i < OVERPASS_URLS.length; i++) {
-      try {
-        var res = await fetch(OVERPASS_URLS[i], {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-          body: "data=" + encodeURIComponent(q)
-        });
-        if (!res.ok) continue;
-        var j = await res.json();
-        // Overpass reports timeouts inside a normal-looking response; treat those as failures, not "nothing found"
-        if (j.remark && /timed out|runtime error|out of memory/i.test(j.remark)) continue;
-        return j.elements || [];
-      } catch (e) { /* try the next server */ }
-    }
-    throw new Error(busyMsg);
-  }
-
-  // Boxes that hug the route (south, west, north, east), padded by padKm.
-  function corridorBoxes(route, padKm, maxBoxes) {
-    var total = route.cum[route.cum.length - 1];
-    var chunk = Math.max(30, total / maxBoxes), next = chunk, boxes = [], b = null;
-    var padLat = padKm / 110.57;
-    for (var i = 0; i < route.coords.length; i++) {
-      var c = route.coords[i];
-      if (!b) b = [c[0], c[1], c[0], c[1]];
-      b[0] = Math.min(b[0], c[0]); b[1] = Math.min(b[1], c[1]); b[2] = Math.max(b[2], c[0]); b[3] = Math.max(b[3], c[1]);
-      if (route.cum[i] >= next || i === route.coords.length - 1) {
-        var padLon = padKm / (111.32 * Math.cos(c[0] * Math.PI / 180));
-        boxes.push([b[0] - padLat, b[1] - padLon, b[2] + padLat, b[3] + padLon].map(function (n) { return n.toFixed(4); }).join(","));
-        b = [c[0], c[1], c[0], c[1]];
-        next = route.cum[i] + chunk;
-      }
-    }
-    return boxes;
-  }
-
-  async function getStops(radiusKm) {
-    var boxes = corridorBoxes(S.base, radiusKm, 30);
-    var q = "[out:json][timeout:40];(" + boxes.map(function (bb) {
-      return 'nwr["tourism"~"^(attraction|viewpoint|museum|gallery|zoo|aquarium|theme_park)$"]["name"](' + bb + ");" +
-        'nwr["historic"~"^(monument|memorial|ruins|heritage|castle|fort)$"]["name"]["wikidata"](' + bb + ");" +
-        'nwr["waterway"="waterfall"]["name"](' + bb + ");" +
-        'nwr["natural"~"^(beach|cave_entrance|peak)$"]["name"]["wikidata"](' + bb + ");" +
-        'node["place"~"^(town|city)$"]["name"](' + bb + ");";
-    }).join("") + ");out center tags;";
-    return overpass(q, "The stops finder is busy right now.");
-  }
-
-  // ---------- Every servo, cached in half-degree map cells ----------
-  var CELL = 0.5, cells = {}, servoIndex = {}, nearKeys = {}, fetchChain = Promise.resolve();
-  function cellOf(lat, lon) { return Math.floor(lat / CELL) + ":" + Math.floor(lon / CELL); }
-  function cellBox(k) { var p = k.split(":").map(Number); return [p[0] * CELL, p[1] * CELL, (p[0] + 1) * CELL, (p[1] + 1) * CELL].join(","); }
-
-  function addServoEl(el) {
-    var lat = el.lat != null ? el.lat : el.center && el.center.lat;
-    var lon = el.lon != null ? el.lon : el.center && el.center.lon;
-    if (lat == null || lon == null) return;
-    var id = el.type + el.id;
-    if (servoIndex[id]) return;
-    var nk = lat.toFixed(3) + "," + lon.toFixed(3); // same servo mapped as a point and a building
-    if (nearKeys[nk]) return;
-    nearKeys[nk] = 1;
-    var t = el.tags || {}, brand = t.brand || "", name = t.name || brand || "Servo";
-    if (brand && name.toLowerCase().indexOf(brand.toLowerCase()) === -1) name = brand + " " + name;
-    servoIndex[id] = { id: id, name: name, lat: lat, lon: lon, tags: t, town: t["addr:suburb"] || t["addr:city"] || "", h24: t.opening_hours === "24/7" };
-  }
-
-  // Load the servos for a set of cells (skipping ones already loaded), a batch at a time so the server isn't swamped.
-  function fetchCells(keys) {
-    if (bundleReady) return Promise.resolve();
-    var need = keys.filter(function (k) { return !cells[k]; });
-    for (var i = 0; i < need.length; i += 30) {
-      (function (batch) {
-        var q = "[out:json][timeout:30];(" + batch.map(function (k) { return 'nwr["amenity"="fuel"](' + cellBox(k) + ");"; }).join("") + ");out center tags;";
-        var p = fetchChain.then(function () { return overpass(q, "The servo finder is busy right now."); })
-          .then(function (els) { els.forEach(addServoEl); },
-                function (e) { batch.forEach(function (k) { delete cells[k]; }); throw e; });
-        fetchChain = p.catch(function () {});
-        batch.forEach(function (k) { cells[k] = p; });
-      })(need.slice(i, i + 30));
-    }
-    return Promise.all(keys.map(function (k) { return cells[k]; }));
-  }
-
-  function routeCells(route) {
-    var keys = {}, pad = 0.02;
-    thin(route.coords, route.cum, 3).coords.forEach(function (c) {
-      [-pad, pad].forEach(function (a) { [-pad, pad].forEach(function (b) { keys[cellOf(c[0] + a, c[1] + b)] = 1; }); });
-    });
-    return Object.keys(keys);
-  }
-
-  function fuelsSold(t) {
-    var map = { "fuel:octane_91": "ULP", "fuel:e10": "E10", "fuel:octane_95": "95", "fuel:octane_98": "98", "fuel:diesel": "Diesel", "fuel:lpg": "LPG" };
-    return Object.keys(map).filter(function (k) { return t[k] === "yes"; }).map(function (k) { return map[k]; }).join(", ");
-  }
-  function servoPopup(s, extra) {
-    var f = fuelsSold(s.tags);
-    return "<b>" + esc(s.name) + "</b><br><small>" + (s.town ? esc(s.town) : "") + (s.h24 ? (s.town ? " · " : "") + "Open 24/7" : "") +
-      (f ? "<br>Sells: " + f : "") + (extra ? "<br>" + extra : "") + "</small>";
-  }
-
-  // ---------- Saved servo list (servos.json, rebuilt weekly by GitHub Actions) ----------
-  // Downloaded once and kept on the phone, so finding fuel stops is instant and doesn't need the map server.
-  var bundleReady = false, bundleVersion = null;
-  function idb() {
-    return new Promise(function (res, rej) {
-      try {
-        var r = indexedDB.open("roadtrip", 1);
-        r.onupgradeneeded = function () { r.result.createObjectStore("kv"); };
-        r.onsuccess = function () { res(r.result); };
-        r.onerror = function () { rej(r.error); };
-      } catch (e) { rej(e); }
-    });
-  }
-  async function idbGet(k) {
-    var db = await idb();
-    return new Promise(function (res, rej) {
-      var q = db.transaction("kv").objectStore("kv").get(k);
-      q.onsuccess = function () { res(q.result); }; q.onerror = function () { rej(q.error); };
-    });
-  }
-  async function idbSet(k, v) {
-    var db = await idb();
-    return new Promise(function (res, rej) {
-      var tx = db.transaction("kv", "readwrite");
-      tx.objectStore("kv").put(v, k);
-      tx.oncomplete = function () { res(); }; tx.onerror = function () { rej(tx.error); };
-    });
-  }
-
-  var FUEL_BITS = [["fuel:octane_91", 1], ["fuel:e10", 2], ["fuel:octane_95", 4], ["fuel:octane_98", 8], ["fuel:diesel", 16], ["fuel:lpg", 32]];
-  function loadBundle(data) {
-    var ix = {}, idx = {};
-    data.cols.forEach(function (k, i) { ix[k] = i; });
-    data.rows.forEach(function (r) {
-      var t = { name: r[ix.name] };
-      if (r[ix.street]) t["addr:street"] = r[ix.street];
-      if (r[ix.town]) t["addr:suburb"] = r[ix.town];
-      if (r[ix.state]) t["addr:state"] = r[ix.state];
-      if (r[ix.postcode]) t["addr:postcode"] = r[ix.postcode];
-      FUEL_BITS.forEach(function (f) {
-        if (r[ix.yes] & f[1]) t[f[0]] = "yes"; else if (r[ix.no] & f[1]) t[f[0]] = "no";
-      });
-      if (r[ix.h24]) t.opening_hours = "24/7";
-      idx[r[ix.id]] = { id: r[ix.id], name: r[ix.name], lat: r[ix.lat], lon: r[ix.lon], tags: t, town: r[ix.town] || "", h24: !!r[ix.h24] };
-    });
-    servoIndex = idx;
-    bundleReady = true;
-    bundleVersion = data.v;
-    allServoLayer.clearLayers(); allMarkers = {};
-    var d = data.updated ? new Date(data.updated + "T00:00:00") : null;
-    $("dataStatus").textContent = "⛽ " + data.rows.length.toLocaleString("en-AU") + " servos saved on this device" +
-      (d ? " · updated " + d.toLocaleDateString("en-AU", { day: "numeric", month: "short" }) : "") + ".";
-  }
-
-  async function initServoData() {
-    try { var saved = await idbGet("servos"); if (saved && saved.rows) loadBundle(saved); } catch (e) {}
-    try {
-      var meta = await (await fetch("servos-meta.json", { cache: "no-cache" })).json();
-      if (!bundleReady || meta.v !== bundleVersion) {
-        if (!bundleReady) $("dataStatus").textContent = "⛽ Downloading servo list…";
-        var res = await fetch("servos.json", { cache: "no-cache" });
-        if (!res.ok) throw new Error("no file");
-        var data = await res.json();
-        loadBundle(data);
-        idbSet("servos", data).catch(function () {});
-        if (S.current) loadServos(); // re-plan with the full list
-      }
-    } catch (e) {
-      if (!bundleReady) $("dataStatus").textContent = "⛽ Finding servos live (no saved servo list yet).";
-    }
-    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
-  }
-
-  // Grey dots for every known servo that isn't one of the route's servos
-  var allMarkers = {};
-  function syncAllServos() {
-    var onRoute = {};
-    S.servos.forEach(function (s) { onRoute[s.id] = 1; });
-    Object.keys(servoIndex).forEach(function (id) {
-      if (onRoute[id]) {
-        if (allMarkers[id]) { allServoLayer.removeLayer(allMarkers[id]); delete allMarkers[id]; }
-        return;
-      }
-      if (allMarkers[id]) return;
-      var s = servoIndex[id];
-      allMarkers[id] = L.circleMarker([s.lat, s.lon], { radius: 4, color: "#fff", weight: 1, fillColor: "#8c8580", fillOpacity: .9 })
-        .bindPopup(function () { return servoPopup(s, "Off your route"); }).addTo(allServoLayer);
-    });
-  }
-
-  // Show every servo once zoomed in, loading the area you're looking at
-  var SHOW_ALL_ZOOM = 9, viewTimer = null;
-  function onView() {
-    var z = map.getZoom();
-    if (z >= SHOW_ALL_ZOOM) { if (!map.hasLayer(allServoLayer)) allServoLayer.addTo(map); }
-    else if (map.hasLayer(allServoLayer)) map.removeLayer(allServoLayer);
-    if (z < SHOW_ALL_ZOOM) return;
-    clearTimeout(viewTimer);
-    viewTimer = setTimeout(function () {
-      var b = map.getBounds(), keys = {};
-      for (var la = Math.floor(b.getSouth() / CELL); la <= Math.floor(b.getNorth() / CELL); la++)
-        for (var lo = Math.floor(b.getWest() / CELL); lo <= Math.floor(b.getEast() / CELL); lo++) keys[la + ":" + lo] = 1;
-      var list = Object.keys(keys);
-      if (list.length > 16) return;
-      fetchCells(list).then(syncAllServos, function () {});
-    }, 400);
-  }
-  map.on("moveend zoomend", onView);
-
-  // ---------- Servos & fuel plan ----------
-  var FUEL_TAG = { ulp: "fuel:octane_91", e10: "fuel:e10", p95: "fuel:octane_95", p98: "fuel:octane_98", diesel: "fuel:diesel", lpg: "fuel:lpg" };
-  var FUEL_NAME = { ulp: "unleaded", e10: "E10", p95: "premium 95", p98: "premium 98", diesel: "diesel", lpg: "LPG" };
-
-  function vehicle() {
-    var tank = parseFloat($("tank").value) || 0;
-    var use = (parseFloat($("economy").value) || 0) * (1 + (parseFloat($("tow").value) || 0));
-    return {
-      tank: tank, use: use, type: $("fuelType").value,
-      startL: tank * parseFloat($("startFuel").value),
-      reserveL: tank * parseFloat($("reserve").value),
-      price: parseFloat($("price").value) || 0
-    };
-  }
-
-  function sells(tags, type) {
-    var v = tags[FUEL_TAG[type]];
-    if (v === "yes") return "yes";
-    if (v === "no") return "no";
-    return "unknown";
-  }
-
-  function processServos() {
-    var r = S.current, near = thin(r.coords, r.cum, 0.3), out = [];
-    var mnLa = Infinity, mnLo = Infinity, mxLa = -Infinity, mxLo = -Infinity;
-    r.coords.forEach(function (c) { mnLa = Math.min(mnLa, c[0]); mxLa = Math.max(mxLa, c[0]); mnLo = Math.min(mnLo, c[1]); mxLo = Math.max(mxLo, c[1]); });
-    Object.keys(servoIndex).forEach(function (id) {
-      var s = servoIndex[id];
-      if (s.lat < mnLa - .05 || s.lat > mxLa + .05 || s.lon < mnLo - .05 || s.lon > mxLo + .05) return;
-      var loc = locate([s.lat, s.lon], near.coords, near.cum);
-      if (loc.off > 1.5) return;
-      out.push({ id: s.id, name: s.name, lat: s.lat, lon: s.lon, tags: s.tags, town: s.town, h24: s.h24, along: loc.along, off: loc.off });
-    });
-    return out.sort(function (a, b) { return a.along - b.along; });
-  }
-
-  function servoPrice(s, v) { return S.prices[s.id] > 0 ? S.prices[s.id] : v.price; }
-
-  // Every stop is a fill to full. Pick the stops that keep you above your reserve with the fewest stops,
-  // and favour cheaper servos: each leg's fuel is costed at the servo you filled up at before it.
-  var STOP_PENALTY = 4; // $-equivalent per extra stop, so it won't add a stop just to save a few cents
-  function planFuel() {
-    var v = vehicle();
-    if (!(v.tank > 0) || !(v.use > 0) || !S.current) return null;
-    var total = S.current.cum[S.current.cum.length - 1];
-    var usable = v.tank - v.reserveL, range = usable / v.use * 100;
-    var L = function (km) { return km * v.use / 100; };
-    S.servos.forEach(function (s) {
-      var sell = sells(s.tags, v.type);
-      s.sell = sell;
-      s.ok = sell === "yes" || (sell === "unknown" && v.type !== "lpg");
-    });
-    var st = S.servos.filter(function (s) { return s.ok && s.along > 0.5 && s.along < total - 0.5; });
-    var price = function (s) { return servoPrice(s, v); };
-    var nodes = [{ along: 0, start: true }].concat(st, [{ along: total, end: true }]);
-    var n = nodes.length, best = [], prev = [];
-    for (var k = 0; k < n; k++) { best.push(Infinity); prev.push(-1); }
-    best[0] = 0;
-    var startReach = Math.max(0, v.startL - v.reserveL) / v.use * 100;
-    for (var i = 0; i < n - 1; i++) {
-      if (best[i] === Infinity) continue;
-      var reach = nodes[i].along + (i === 0 ? startReach : range);
-      var legPrice = i === 0 ? v.price : price(nodes[i]);
-      for (var j = i + 1; j < n && nodes[j].along <= reach + 1e-6; j++) {
-        var c = best[i] + L(nodes[j].along - nodes[i].along) * legPrice + (nodes[j].end ? 0 : STOP_PENALTY);
-        if (c < best[j] - 1e-9) { best[j] = c; prev[j] = i; }
-      }
-    }
-    var warnings = [], last = n - 1;
-    if (best[n - 1] === Infinity) {
-      // Can't make it: plan as far as possible, then warn about the gap
-      last = 0;
-      for (var q = 0; q < n - 1; q++) if (best[q] < Infinity && nodes[q].along >= nodes[last].along) last = q;
-      var lr = nodes[last].along + (last === 0 ? startReach : range);
-      warnings.push(gapWarning(last === 0 ? null : nodes[last], nodes[last].along, lr, st, total, lr - nodes[last].along));
-    }
-    var path = [];
-    for (var x = last; x !== -1; x = prev[x]) path.unshift(x);
-    var steps = [], fuel = v.startL, bought = 0, cost = 0;
-    for (var y = 1; y < path.length; y++) {
-      var from = nodes[path[y - 1]], to = nodes[path[y]];
-      fuel -= L(to.along - from.along);
-      if (to.end) break;
-      var buy = v.tank - fuel, pr = price(to);
-      steps.push({ s: to, buy: buy, price: pr, cost: buy * pr, arriveL: fuel });
-      bought += buy; cost += buy * pr; fuel = v.tank;
-    }
-
-    // Longest stretch with no usable servo (including from the start and to the finish)
-    var marks = [0].concat(st.map(function (s) { return s.along; }), [total]), gap = 0, gapAt = 0;
-    for (var g = 1; g < marks.length; g++) if (marks[g] - marks[g - 1] > gap) { gap = marks[g] - marks[g - 1]; gapAt = marks[g - 1]; }
-
-    return {
-      steps: steps, warnings: warnings, bought: bought, cost: cost, range: range, total: total,
-      endL: warnings.length ? null : fuel, longestGap: gap, gapAt: gapAt, usable: st.length, v: v
-    };
-  }
-
-  // ---------- Servo addresses: from the map data, or looked up for planned stops ----------
-  var addrCache = {}, addrQueue = [], addrBusy = false;
-  function tagAddress(t) {
-    var street = [t["addr:housenumber"], t["addr:street"]].filter(Boolean).join(" ");
-    var town = t["addr:suburb"] || t["addr:city"] || t["addr:town"] || "";
-    var st = [abbr(t["addr:state"]), t["addr:postcode"]].filter(Boolean).join(" ");
-    return { text: [street, town, st].filter(Boolean).join(", "), hasStreet: !!t["addr:street"] };
-  }
-  function servoAddress(s) {
-    if (addrCache[s.id] !== undefined) return addrCache[s.id];
-    var a = tagAddress(s.tags);
-    if (a.hasStreet) { addrCache[s.id] = a.text; return a.text; }
-    if (!addrQueue.some(function (q) { return q.id === s.id; })) { addrQueue.push(s); pumpAddresses(); }
-    return null; // still looking
-  }
-  async function pumpAddresses() {
-    if (addrBusy) return;
-    addrBusy = true;
-    while (addrQueue.length) {
-      var s = addrQueue.shift();
-      try {
-        var res = await fetch(GEOCODE_URL.replace("/search", "/reverse") + "?format=jsonv2&zoom=18&addressdetails=1&lat=" + s.lat + "&lon=" + s.lon,
-          { headers: { "Accept-Language": "en-AU" } });
-        var a = (await res.json()).address || {};
-        var street = [a.house_number, a.road].filter(Boolean).join(" ");
-        var town = a.suburb || a.town || a.city || a.village || a.hamlet || "";
-        addrCache[s.id] = [street, town, [abbr(a.state), a.postcode].filter(Boolean).join(" ")].filter(Boolean).join(", ") || tagAddress(s.tags).text;
-      } catch (e) { addrCache[s.id] = tagAddress(s.tags).text; }
-      renderPlan();
-      await sleep(1100); // the free address service allows about one lookup a second
-    }
-    addrBusy = false;
-  }
-
-  function gapWarning(cur, pos, reach, st, total, range) {
-    var next = st.filter(function (s) { return s.along > reach; })[0];
-    var gap = (next ? next.along : total) - pos;
-    return "From " + (cur ? esc(cur.name) : "your start") + " (" + km(pos) + " in), the next " + FUEL_NAME[$("fuelType").value] +
-      " is about " + km(gap) + " away, more than your safe range of " + km(range) +
-      ". Carry spare fuel, leave with more in the tank, or check for servos the map doesn't know about.";
-  }
-
-  function renderPlan() {
-    var card = $("planCard");
-    if (!S.current) return;
-    card.classList.remove("hidden");
-    var v = vehicle();
-    $("rangeHint").textContent = v.tank > 0 && v.use > 0
-      ? "Safe range: about " + km((v.tank - v.reserveL) / v.use * 100) + " per tank, keeping " + Math.round(v.reserveL) + " L in reserve."
-      : "";
-    if (!S.servosLoaded) return;
-    var r = planFuel();
-    if (!r) { $("planBody").innerHTML = '<p class="empty">Add your tank size and fuel use to plan fuel stops.</p>'; return; }
-    var people = parseInt($("people").value, 10) || 1;
-    var html = '<div class="plan-sum"><b>' + (r.steps.length ? r.steps.length + " fuel stop" + (r.steps.length > 1 ? "s" : "") : "No fuel stops needed") + "</b>" +
-      (r.cost > 0 ? " · " + aud.format(r.cost) + " at the pump" + (people > 1 ? " (" + aud.format(r.cost / people) + " each)" : "") : "") +
-      "<br>Longest stretch without " + FUEL_NAME[v.type] + ": <b>" + km(r.longestGap) + "</b>" +
-      (r.longestGap > r.range ? " ⚠️" : "") + "</div>";
-    r.warnings.forEach(function (w) { html += '<div class="warn">⚠️ ' + w + "</div>"; });
-    html += '<div class="pstep"><div class="num end">▶</div><div><div class="t">Leave ' + esc(S.from.name) + "</div>" +
-      '<div class="m">' + Math.round(v.startL) + " L in the tank</div></div><div></div></div>";
-    r.steps.forEach(function (st, i) {
-      var s = st.s, own = S.prices[s.id] > 0;
-      html += '<div class="pstep"><div class="num">' + (i + 1) + "</div><div>" +
-        '<div class="t" data-servo="' + s.id + '">' + esc(s.name) + (s.h24 ? '<span class="badge">24/7</span>' : "") +
-        (s.sell === "unknown" ? '<span class="badge warnb">check ' + FUEL_NAME[v.type] + "</span>" : "") + "</div>" +
-        '<div class="addr">' + (function () { var a = servoAddress(s); return a === null ? "Finding address…" : esc(a || "Address not listed"); })() + "</div>" +
-        '<div class="m">' + km(s.along) + " in · arrive with ~" + Math.round(st.arriveL) + " L</div></div>" +
-        '<div class="c">' + aud.format(st.cost) + "<small>~" + Math.round(st.buy) + " L to fill</small>" +
-        "<small>" + (own ? "$" + st.price.toFixed(2) + "/L (yours)" : "est. $" + st.price.toFixed(2) + "/L") + "</small></div></div>";
-    });
-    if (r.endL != null) {
-      html += '<div class="pstep"><div class="num end">■</div><div><div class="t">Arrive ' + esc(S.to.name) + "</div>" +
-        '<div class="m">About ' + Math.round(r.endL) + " L left</div></div><div></div></div>";
-    }
-    $("planBody").innerHTML = html;
-    drawServos(r);
-  }
-
-  function renderServoList() {
-    var v = vehicle();
-    $("servoCount").textContent = "(" + S.servos.length + ")";
-    if (!S.servos.length) { $("servoList").innerHTML = '<p class="empty">No servos found on this route.</p>'; return; }
-    $("servoList").innerHTML = S.servos.map(function (s) {
-      var sell = sells(s.tags, v.type);
-      return '<div class="srow"><div><div class="name" data-servo="' + s.id + '" style="font-weight:600;font-size:15px;cursor:pointer">' + esc(s.name) +
-        (s.h24 ? '<span class="badge">24/7</span>' : "") +
-        (sell === "no" || (sell === "unknown" && v.type === "lpg") ? '<span class="badge warnb">no ' + FUEL_NAME[v.type] + "</span>" : "") + "</div>" +
-        '<div class="meta">' + (s.town ? esc(s.town) + " · " : "") + km(s.along) + " in</div></div>" +
-        '<input type="number" inputmode="decimal" step="0.01" min="0" data-price="' + s.id + '" value="' + (S.prices[s.id] || "") +
-        '" placeholder="$' + (v.price || 0).toFixed(2) + '" aria-label="Price per litre at ' + esc(s.name) + '"></div>';
-    }).join("");
-  }
-
-  var servoLayerMarkers = {};
-  function drawServos(r) {
-    servoLayer.clearLayers(); servoLayerMarkers = {};
-    var planIds = {};
-    (r ? r.steps : []).forEach(function (st, i) { planIds[st.s.id] = i + 1; });
-    S.servos.forEach(function (s) {
-      var m;
-      if (planIds[s.id]) {
-        m = L.marker([s.lat, s.lon], { icon: L.divIcon({ className: "", html: '<div class="fpin">⛽ ' + planIds[s.id] + "</div>", iconSize: null, iconAnchor: [18, 12] }), zIndexOffset: 500 });
-      } else if (s.ok) {
-        m = L.circleMarker([s.lat, s.lon], { radius: 5, color: "#fff", weight: 1.5, fillColor: "#4c8df6", fillOpacity: 1 }).setStyle({ color: "#1a56c4", weight: 2 });
-      } else {
-        m = L.circleMarker([s.lat, s.lon], { radius: 4, color: "#fff", weight: 1, fillColor: "#8c8580", fillOpacity: .9 });
-      }
-      m.bindPopup(servoPopup(s, km(s.along) + " into the trip" + (planIds[s.id] ? " · fuel stop " + planIds[s.id] : "")));
-      m.addTo(servoLayer); servoLayerMarkers[s.id] = m;
-    });
-  }
-
-  async function loadServos() {
-    S.servosLoaded = false;
-    $("planCard").classList.remove("hidden");
-    $("planBody").innerHTML = '<p class="empty">' + (bundleReady ? "Planning fuel stops…" : "Finding servos along your route…") + "</p>";
-    try {
-      await fetchCells(routeCells(S.current));
-      S.servos = processServos();
-      S.servosLoaded = true;
-      syncAllServos();
-      renderServoList();
-      renderPlan();
-    } catch (err) {
-      $("planBody").innerHTML = '<p class="empty">' + esc(err.message || "Couldn't load servos.") +
-        ' <button type="button" class="add" id="retryServos">Try again</button></p>';
-    }
-  }
-
-  function categorise(t) {
-    if (t.place) return "town";
-    if (t.tourism === "viewpoint") return "lookout";
-    if (t.tourism === "museum" || t.tourism === "gallery") return "museum";
-    if (t.tourism === "zoo" || t.tourism === "aquarium" || t.tourism === "theme_park") return "family";
-    if (t.waterway === "waterfall" || t.natural) return "nature";
-    if (t.historic) return "history";
-    return "attraction";
-  }
-
-  function processStops(elements, radiusKm) {
-    var base = S.base;
-    var near = thin(base.coords, base.cum, 0.3); // lighter line for distance maths
-    var out = [], seen = {};
-    elements.forEach(function (el) {
-      var lat = el.lat != null ? el.lat : el.center && el.center.lat;
-      var lon = el.lon != null ? el.lon : el.center && el.center.lon;
-      if (lat == null || lon == null || !el.tags || !el.tags.name) return;
-      var name = el.tags.name.trim();
-      var key = name.toLowerCase();
-      var loc = locate([lat, lon], near.coords, near.cum);
-      if (loc.off > radiusKm) return;
-      // Skip the start and finish towns themselves
-      if (loc.along < 2 || loc.along > near.cum[near.cum.length - 1] - 2) { if (el.tags.place) return; }
-      if (seen[key] && Math.abs(seen[key].along - loc.along) < 5) return;
-      var cat = categorise(el.tags);
-      var must = cat !== "town" && !!(el.tags.wikipedia || el.tags.wikidata);
-      var poi = {
-        id: el.type + el.id, name: name, lat: lat, lon: lon, cat: cat, must: must,
-        off: loc.off, along: loc.along,
-        score: (must ? 3 : 0) + (el.tags.wikipedia ? 1 : 0) + (cat === "lookout" || cat === "nature" ? 0.5 : 0) - loc.off / 20
-      };
-      seen[key] = poi;
-      out.push(poi);
-    });
-    // Keep the best ones so the list stays useful on long trips, then order by distance along the route.
-    var towns = out.filter(function (p) { return p.cat === "town"; });
-    var sights = out.filter(function (p) { return p.cat !== "town"; })
-      .sort(function (a, b) { return b.score - a.score; }).slice(0, 80);
-    return sights.concat(towns.slice(0, 40)).sort(function (a, b) { return a.along - b.along; });
-  }
-
-  // ---------- Drawing ----------
-  function endMarker(p, label, color) {
-    return L.circleMarker([p.lat, p.lon], { radius: 9, color: "#fff", weight: 3, fillColor: color, fillOpacity: 1 })
-      .bindTooltip(label + ": " + esc(p.name), { direction: "top" });
-  }
-
-  function drawRoute(fit) {
-    routeLayer.clearLayers();
-    var r = S.current;
-    L.polyline(r.coords, { color: "#1a56c4", weight: 9, opacity: 1, lineJoin: "round" }).addTo(routeLayer);
-    L.polyline(r.coords, { color: "#4c8df6", weight: 6, opacity: 1, lineJoin: "round" }).addTo(routeLayer);
-    endMarker(S.from, "Start", "#4f6b52").addTo(routeLayer);
-    endMarker(S.to, "Finish", "#2a2420").addTo(routeLayer);
-    if (fit) map.fitBounds(L.latLngBounds(r.coords), { padding: [24, 24] });
-  }
-
-  function popupHtml(p) {
-    var on = !!S.selected[p.id];
-    return "<b>" + esc(p.name) + "</b><br>" + CATS[p.cat].emo + " " + CATS[p.cat].label +
-      (p.must ? ' <span class="badge">Popular</span>' : "") +
-      "<br><small>" + km(p.along) + " into the trip · ~" + (p.off < 1 ? "<1" : Math.round(p.off)) + " km off route</small><br>" +
-      '<button class="add' + (on ? " on" : "") + '" data-add="' + p.id + '">' + (on ? "✓ Added" : "+ Add to trip") + "</button>";
-  }
-
-  function drawStops() {
-    poiLayer.clearLayers(); poiMarkers = {};
-    visibleStops().forEach(function (p) {
-      var on = !!S.selected[p.id];
-      var m = L.circleMarker([p.lat, p.lon], {
-        radius: on ? 9 : p.must ? 7 : 5, color: "#fff", weight: 2,
-        fillColor: on ? "#c2522d" : CATS[p.cat].color, fillOpacity: .95
-      }).bindPopup(function () { return popupHtml(p); });
-      m.addTo(poiLayer); poiMarkers[p.id] = m;
-    });
-  }
-
-  function visibleStops() {
-    return S.pois.filter(function (p) {
-      if (S.selected[p.id]) return true;
-      if (S.filter === "all") return true;
-      if (S.filter === "must") return p.must;
-      return p.cat === S.filter;
-    });
-  }
-
-  function renderChips() {
-    var counts = { all: S.pois.length, must: 0 };
-    S.pois.forEach(function (p) { counts[p.cat] = (counts[p.cat] || 0) + 1; if (p.must) counts.must++; });
-    var keys = ["all", "must", "town", "lookout", "nature", "attraction", "museum", "history", "family"];
-    $("chips").innerHTML = keys.filter(function (k) { return counts[k]; }).map(function (k) {
-      var label = k === "all" ? "All" : CATS[k].emo + " " + CATS[k].label;
-      return '<button type="button" class="chip" data-filter="' + k + '" aria-pressed="' + (S.filter === k) + '">' + label + " " + counts[k] + "</button>";
-    }).join("");
-  }
-
-  function renderList() {
-    var list = visibleStops();
-    if (!S.pois.length) { $("stopList").innerHTML = '<p class="empty">No stops found this close to the route. Try a wider distance.</p>'; return; }
-    $("stopList").innerHTML = list.map(function (p) {
-      var on = !!S.selected[p.id];
-      return '<div class="stop"><div class="emo">' + CATS[p.cat].emo + "</div><div>" +
-        '<div class="name" data-view="' + p.id + '">' + esc(p.name) + (p.must ? '<span class="badge">Popular</span>' : "") + "</div>" +
-        '<div class="meta">' + km(p.along) + " in · ~" + (p.off < 1 ? "<1" : Math.round(p.off)) + " km off route</div></div>" +
-        '<button type="button" class="add' + (on ? " on" : "") + '" data-add="' + p.id + '">' + (on ? "✓ Added" : "+ Add") + "</button></div>";
-    }).join("");
-  }
-
-  function renderSummary() {
-    var r = S.current, b = S.base;
-    var econ = parseFloat($("economy").value) || 0;
-    var price = parseFloat($("price").value) || 0;
-    var tow = parseFloat($("tow").value) || 0;
-    var people = parseInt($("people").value, 10) || 1;
-    var litres = r.distance * econ * (1 + tow) / 100;
-    var cost = litres * price;
-    var stops = selectedStops();
-
-    $("routeName").textContent = S.from.name + " → " + S.to.name + (stops.length ? " · " + stops.length + " stop" + (stops.length > 1 ? "s" : "") + " added" : "");
-    $("dist").textContent = km(r.distance);
-    $("time").textContent = dur(r.duration);
-    var extraKm = r.distance - b.distance, extraT = r.duration - b.duration;
-    $("distExtra").textContent = stops.length && extraKm > 0.5 ? "+" + km(extraKm) + " for stops" : "";
-    $("timeExtra").textContent = stops.length && extraT > 60 ? "+" + dur(extraT) + " for stops" : "";
-    $("cost").textContent = cost > 0 ? aud.format(cost) : "–";
-    $("litres").textContent = cost > 0 ? (people > 1 ? aud.format(cost / people) + " each" : Math.round(litres) + " L") : "Set fuel price";
-    $("breaks").textContent = String(Math.floor(r.duration / 7200));
-
-    // Google Maps hand-off for turn-by-turn navigation
-    var u = "https://www.google.com/maps/dir/?api=1&travelmode=driving" +
-      "&origin=" + S.from.lat + "," + S.from.lon + "&destination=" + S.to.lat + "," + S.to.lon;
-    if (stops.length) u += "&waypoints=" + encodeURIComponent(stops.slice(0, 9).map(function (p) { return p.lat + "," + p.lon; }).join("|"));
-    $("gmaps").href = u;
-    save();
-  }
-
-  function selectedStops() {
-    return S.pois.filter(function (p) { return S.selected[p.id]; }).sort(function (a, b) { return a.along - b.along; });
-  }
-
-  // ---------- Flow ----------
-  var busy = false;
-  async function plan(e) {
-    if (e) e.preventDefault();
-    if (busy) return;
-    var fromQ = $("from").value.trim(), toQ = $("to").value.trim();
-    if (!fromQ || !toQ) { setStatus("Add where you're starting and where you're going.", true); return; }
-    busy = true; $("go").disabled = true;
-    try {
-      setStatus("Finding places…");
-      var fromPicked = (fromQ === "My location" && S.geoFrom) ? S.geoFrom : (picks.from && picks.from.text === fromQ ? picks.from : null);
-      var toPicked = picks.to && picks.to.text === toQ ? picks.to : null;
-      S.from = fromPicked || await geocode(fromQ);
-      if (!fromPicked && !toPicked) await sleep(1100); // be polite to the free fallback search
-      S.to = toPicked || await geocode(toQ);
-      setStatus("Working out the route…");
-      S.base = await getRoute([S.from, S.to]);
-      S.current = S.base;
-      S.selected = {}; S.pois = []; S.filter = "all";
-      drawRoute(true); poiLayer.clearLayers();
-      $("summary").classList.remove("hidden");
-      renderSummary();
-      setStatus("");
-      S.prices = {};
-      servoLayer.clearLayers();
-      loadServos().then(loadStops);
-    } catch (err) {
-      setStatus(err.message || "Something went wrong. Try again.", true);
-    } finally {
-      busy = false; $("go").disabled = false;
-    }
-  }
-
-  async function loadStops() {
-    var card = $("stopsCard");
-    card.classList.remove("hidden");
-    $("chips").innerHTML = "";
-    $("stopList").innerHTML = '<p class="empty">Finding stops along your route…</p>';
-    var radius = parseFloat($("radius").value);
-    try {
-      var els = await getStops(radius);
-      var keep = S.pois.filter(function (p) { return S.selected[p.id]; });
-      S.pois = processStops(els, radius);
-      keep.forEach(function (k) { if (!S.pois.some(function (p) { return p.id === k.id; })) S.pois.push(k); });
-      S.pois.sort(function (a, b) { return a.along - b.along; });
-      renderChips(); renderList(); drawStops();
-    } catch (err) {
-      $("stopList").innerHTML = '<p class="empty">' + esc(err.message || "Couldn't load stops.") +
-        ' <button type="button" class="add" id="retryStops">Try again</button></p>';
-    }
-  }
-
-  async function toggleStop(id) {
-    if (busy) return;
-    S.selected[id] = !S.selected[id];
-    if (!S.selected[id]) delete S.selected[id];
-    refreshStopUI(id);
-    busy = true;
-    try {
-      var pts = [S.from].concat(selectedStops(), [S.to]);
-      S.current = pts.length > 2 ? await getRoute(pts) : S.base;
-      drawRoute(false);
-      renderSummary();
-      loadServos();
-    } catch (err) {
-      delete S.selected[id];
-      refreshStopUI(id);
-      setStatus("Couldn't add that stop to the route. Try again.", true);
-    } finally { busy = false; }
-  }
-
-  function refreshStopUI(id) {
-    renderList(); drawStops();
-    var m = poiMarkers[id];
-    if (m && m.isPopupOpen && m.isPopupOpen()) m.setPopupContent(popupHtml(S.pois.find(function (p) { return p.id === id; })));
-  }
-
-  // ---------- Events ----------
-  $("tripForm").addEventListener("submit", plan);
-  $("radius").addEventListener("change", function () { if (S.base) loadStops(); });
-  ["economy", "price", "tow", "people", "tank", "fuelType", "startFuel", "reserve"].forEach(function (id) {
-    var h = function () {
-      if (S.current) { renderSummary(); renderPlan(); if (S.servosLoaded && (id === "fuelType" || id === "price")) renderServoList(); }
-      else { save(); renderRangeOnly(); }
-    };
-    $(id).addEventListener("input", h); $(id).addEventListener("change", h);
-  });
-  function renderRangeOnly() {
-    var v = vehicle();
-    $("rangeHint").textContent = v.tank > 0 && v.use > 0
-      ? "Safe range: about " + km((v.tank - v.reserveL) / v.use * 100) + " per tank, keeping " + Math.round(v.reserveL) + " L in reserve." : "";
-  }
-  document.addEventListener("input", function (e) {
-    var id = e.target && e.target.dataset && e.target.dataset.price;
-    if (!id) return;
-    var val = parseFloat(e.target.value);
-    if (val > 0) S.prices[id] = val; else delete S.prices[id];
-    renderPlan();
-  });
-
-  document.addEventListener("click", function (e) {
-    var t = e.target.closest("[data-add],[data-view],[data-filter],[data-servo],#retryStops,#retryServos");
-    if (!t) return;
-    if (t.id === "retryStops") { loadStops(); return; }
-    if (t.id === "retryServos") { loadServos(); return; }
-    if (t.dataset.servo) {
-      var sv = S.servos.find(function (x) { return x.id === t.dataset.servo; });
-      if (sv) {
-        map.setView([sv.lat, sv.lon], 14);
-        if (servoLayerMarkers[sv.id]) servoLayerMarkers[sv.id].openPopup();
-        if (window.innerWidth < 900) window.scrollTo({ top: 0, behavior: "smooth" });
-      }
-      return;
-    }
-    if (t.dataset.filter) { S.filter = t.dataset.filter; renderChips(); renderList(); drawStops(); return; }
-    if (t.dataset.add) { toggleStop(t.dataset.add); return; }
-    if (t.dataset.view) {
-      var p = S.pois.find(function (x) { return x.id === t.dataset.view; });
-      if (p) {
-        map.setView([p.lat, p.lon], 12);
-        if (poiMarkers[p.id]) poiMarkers[p.id].openPopup();
-        if (window.innerWidth < 900) window.scrollTo({ top: 0, behavior: "smooth" });
-      }
-    }
-  });
-
-  $("locate").addEventListener("click", function () {
-    if (!navigator.geolocation) { setStatus("Your browser can't share location.", true); return; }
-    setStatus("Getting your location…");
-    navigator.geolocation.getCurrentPosition(function (pos) {
-      S.geoFrom = { lat: pos.coords.latitude, lon: pos.coords.longitude, name: "My location" };
-      $("from").value = "My location";
-      setStatus("");
-    }, function () { setStatus("Couldn't get your location. Type a town instead.", true); }, { timeout: 10000 });
-  });
-  $("from").addEventListener("input", function () { if ($("from").value !== "My location") S.geoFrom = null; });
-  setupSuggest("from");
-  setupSuggest("to");
-  initServoData();
-
-  $("copy").addEventListener("click", function () {
-    if (!S.current) return;
-    var r = S.current, stops = selectedStops();
-    var txt = "🚗 " + S.from.name + " → " + S.to.name + "\n" + km(r.distance) + " · about " + dur(r.duration) + " driving";
-    var cost = $("cost").textContent;
-    if (cost !== "–") txt += "\n⛽ Fuel: " + cost + ($("litres").textContent.indexOf("each") > -1 ? " (" + $("litres").textContent + ")" : "");
-    if (stops.length) txt += "\n📍 Stops: " + stops.map(function (p) { return p.name; }).join(", ");
-    var fp = S.servosLoaded ? planFuel() : null;
-    if (fp && fp.steps.length) txt += "\n⛽ Fuel stops:\n" + fp.steps.map(function (st, i) {
-      return (i + 1) + ". " + st.s.name + (addrCache[st.s.id] ? ", " + addrCache[st.s.id] : "") + " (" + km(st.s.along) + " in)";
-    }).join("\n");
-    txt += "\nGoogle Maps: " + $("gmaps").href;
-    var done = function (m) { $("copyStatus").textContent = m; setTimeout(function () { $("copyStatus").textContent = ""; }, 2500); };
-    try { navigator.clipboard.writeText(txt).then(function () { done("Copied, paste it in the group chat."); }, function () { done("Couldn't copy."); }); }
-    catch (e) { done("Couldn't copy."); }
-  });
-
-  // ---------- Remember settings on this device ----------
-  var KEY = "roadTripPlanner.v1";
-  function save() {
-    try {
-      localStorage.setItem(KEY, JSON.stringify({
-        from: $("from").value === "My location" ? "" : $("from").value, to: $("to").value,
-        economy: $("economy").value, price: $("price").value, people: $("people").value, tow: $("tow").value,
-        tank: $("tank").value, fuelType: $("fuelType").value, startFuel: $("startFuel").value, reserve: $("reserve").value
-      }));
-    } catch (e) {}
-  }
-  try {
-    var s = JSON.parse(localStorage.getItem(KEY) || "null");
-    if (s) {
-      if (s.from) $("from").value = s.from;
-      if (s.to) $("to").value = s.to;
-      if (s.economy) $("economy").value = s.economy;
-      if (s.price) $("price").value = s.price;
-      if (s.people) $("people").value = s.people;
-      if (s.tow) $("tow").value = s.tow;
-      ["tank", "fuelType", "startFuel", "reserve"].forEach(function (k) { if (s[k]) $(k).value = s[k]; });
-    }
-  } catch (e) {}
-  renderRangeOnly();
-})();
-</script>
+<script src="app.js"></script>
 </body>
 </html>
