@@ -10,8 +10,11 @@ const SERVERS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.private.coffee/api/interpreter",
 ];
-const QUERY =
-  '[out:json][timeout:600];area["ISO3166-1"="AU"][admin_level=2]->.au;nwr["amenity"="fuel"](area.au);out center tags;';
+// One query per state/territory: small enough that each answers well inside Node's 5-minute wait limit.
+const REGIONS = ["AU-SA", "AU-VIC", "AU-NSW", "AU-ACT", "AU-QLD", "AU-WA", "AU-TAS", "AU-NT"];
+const queryFor = (code) =>
+  `[out:json][timeout:180];area["ISO3166-2"="${code}"]->.s;nwr["amenity"="fuel"](area.s);out center tags;`;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Bit flags for which fuels a servo sells (and which it's recorded as NOT selling). Anything else is "unknown".
 const FUELS = [
@@ -29,29 +32,48 @@ const STATES = {
 const COLS = ["id", "lat", "lon", "name", "street", "town", "state", "postcode", "yes", "no", "h24"];
 const MIN_EXPECTED = 2000; // refuse to publish an obviously incomplete download
 
-async function fetchServos() {
-  for (const url of SERVERS) {
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          "User-Agent": "RoadTripPlanner servo data builder (GitHub Actions)",
-        },
-        body: "data=" + encodeURIComponent(QUERY),
-      });
-      if (!res.ok) { console.warn(`${url} answered ${res.status}`); continue; }
-      const json = await res.json();
-      if (json.remark && /timed out|runtime error|out of memory/i.test(json.remark)) {
-        console.warn(`${url}: ${json.remark}`);
-        continue;
+async function fetchRegion(code) {
+  for (let round = 1; round <= 3; round++) {
+    for (const url of SERVERS) {
+      try {
+        const els = await query(url, queryFor(code));
+        if (els) return els;
+      } catch (err) {
+        console.warn(`  ${code} via ${url} failed: ${err.message}`);
       }
-      return json.elements || [];
-    } catch (err) {
-      console.warn(`${url} failed: ${err.message}`);
     }
+    console.warn(`  ${code}: retrying in ${20 * round}s…`);
+    await sleep(20000 * round);
   }
-  throw new Error("Every Overpass server failed. Try again later.");
+  throw new Error(`Couldn't download ${code} after 3 tries. Try again later.`);
+}
+
+async function fetchServos() {
+  const all = [];
+  for (const code of REGIONS) {
+    const els = await fetchRegion(code);
+    console.log(`  ${code}: ${els.length} map entries`);
+    if (els.length === 0) throw new Error(`${code} came back empty, which can't be right. Not publishing.`);
+    all.push(...els);
+    await sleep(3000); // be polite to the free server
+  }
+  return all;
+}
+
+async function query(url, q) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "User-Agent": "RoadTripPlanner servo data builder (GitHub Actions)",
+    },
+    body: "data=" + encodeURIComponent(q),
+    signal: AbortSignal.timeout(240000), // give up before Node's own 5-minute limit
+  });
+  if (!res.ok) throw new Error(`server answered ${res.status}`);
+  const json = await res.json();
+  if (json.remark && /timed out|runtime error|out of memory/i.test(json.remark)) throw new Error(json.remark);
+  return json.elements || [];
 }
 
 export function buildRows(elements) {
